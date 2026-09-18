@@ -70,61 +70,95 @@ export function ShuorenhuaModal({
     setError(null)
 
     try {
-      const response = await fetch('/shuorenhua/stream', {
+      let streamAttempted = false
+      try {
+        const response = await fetch('/shuorenhua/stream', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ text }),
+          signal: controller.signal,
+        })
+
+        if (response.ok && response.body) {
+          streamAttempted = true
+          const reader = response.body.getReader()
+          const decoder = new TextDecoder('utf-8')
+          let buffer = ''
+          let fullText = ''
+
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+
+            buffer += decoder.decode(value, { stream: true })
+            const lines = buffer.split('\n\n')
+            buffer = lines.pop() || ''
+
+            for (const line of lines) {
+              const trimmed = line.trim()
+              if (!trimmed.startsWith('data:')) continue
+              const jsonStr = trimmed.slice(5).trim()
+              if (!jsonStr) continue
+
+              let data: any
+              try {
+                data = JSON.parse(jsonStr)
+              } catch {
+                continue
+              }
+
+              if (data.error) {
+                throw new Error(data.error)
+              }
+              if (data.done) {
+                break
+              }
+              if (typeof data.delta === 'string') {
+                fullText += data.delta
+                setStreamedText(fullText)
+              }
+            }
+          }
+
+          if (!fullText.trim()) {
+            throw new Error('AI 返回内容为空，请检查模型提供方与网络配置后重试')
+          }
+          return
+        }
+      } catch (streamErr: any) {
+        if (controller.signal.aborted) return
+        if (streamAttempted) throw streamErr
+        // If streaming route was not available, proceed to Typert RPC fallback
+      }
+
+      // Typert RPC fallback: call /api/shuorenhua/humanize directly over DSH Connection
+      const rpcResponse = await fetch('/api/shuorenhua/humanize', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ text }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'client-request',
+          rpcId: String(Date.now()),
+          method: 'shuorenhua/humanize',
+          payload: { args: { text } },
+        }),
         signal: controller.signal,
       })
 
-      if (!response.ok || !response.body) {
-        throw new Error(`HTTP ${response.status}: 后端服务未就绪，请先重启 dsh web 服务`)
+      if (!rpcResponse.ok) {
+        throw new Error(`RPC 失败 HTTP ${rpcResponse.status}: 宿主服务未就绪`)
       }
 
-      const reader = response.body.getReader()
-      const decoder = new TextDecoder('utf-8')
-      let buffer = ''
-      let fullText = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n\n')
-        buffer = lines.pop() || ''
-
-        for (const line of lines) {
-          const trimmed = line.trim()
-          if (!trimmed.startsWith('data:')) continue
-          const jsonStr = trimmed.slice(5).trim()
-          if (!jsonStr) continue
-
-          try {
-            const data = JSON.parse(jsonStr)
-            if (data.error) {
-              throw new Error(data.error)
-            }
-            if (data.done) {
-              break
-            }
-            if (typeof data.delta === 'string') {
-              fullText += data.delta
-              setStreamedText(fullText)
-            }
-          } catch (e: any) {
-            if (e.message && e.message !== 'Unexpected token') {
-              throw e
-            }
-          }
-        }
+      const rpcData = await rpcResponse.json()
+      if (rpcData.result?.ok && rpcData.result.value?.text) {
+        setStreamedText(rpcData.result.value.text)
+        return
       }
-
-      if (!fullText.trim()) {
-        throw new Error('AI 返回内容为空，请点击重新润色')
+      if (rpcData.result?.error?.message) {
+        throw new Error(rpcData.result.error.message)
       }
+      throw new Error('AI 润色未返回有效结果')
     } catch (err: any) {
       if (controller.signal.aborted) return
       setError(err?.message || 'AI 润色请求失败，请检查服务后点击重试')

@@ -29,31 +29,39 @@ export function ShuorenhuaButton({
   // 1. Try to extract message text reactively from useChat snapshot when available
   const snapshotText = typeof useChat === 'function'
     ? useChat((snapshot: any) => {
-        if (!snapshot || !snapshot.nodes || typeof snapshot.nodes.values !== 'function') {
-          return ''
-        }
+        if (!snapshot) return ''
         try {
-          const nodes = snapshot.nodes.values()
-          for (const node of nodes) {
-            // Check assistant-step
-            if (node.kind === 'assistant-step') {
-              const data = node.data
-              if (data?.finalNode?.messageId === messageId && Array.isArray(data?.blocks)) {
-                return data.blocks
-                  .flatMap((b: any) => (b.kind === 'text' ? [b.text] : []))
-                  .join('')
+          if (snapshot.nodes && typeof snapshot.nodes.values === 'function') {
+            const nodes = snapshot.nodes.values()
+            for (const node of nodes) {
+              // Check assistant-step
+              if (node.kind === 'assistant-step') {
+                const data = node.data
+                if (data?.finalNode?.messageId === messageId && Array.isArray(data?.blocks)) {
+                  return data.blocks
+                    .flatMap((b: any) => (b.kind === 'text' ? [b.text] : []))
+                    .join('')
+                }
+              }
+              // Check turn-tail closing
+              if (node.kind === 'turn-tail') {
+                const data = node.data
+                if (
+                  data?.closing?.finalNode?.messageId === messageId &&
+                  Array.isArray(data?.closing?.blocks)
+                ) {
+                  return data.closing.blocks
+                    .flatMap((b: any) => (b.kind === 'text' ? [b.text] : []))
+                    .join('')
+                }
               }
             }
-            // Check turn-tail closing
-            if (node.kind === 'turn-tail') {
-              const data = node.data
-              if (
-                data?.closing?.finalNode?.messageId === messageId &&
-                Array.isArray(data?.closing?.blocks)
-              ) {
-                return data.closing.blocks
-                  .flatMap((b: any) => (b.kind === 'text' ? [b.text] : []))
-                  .join('')
+          }
+          // Check legacy conversation slice
+          if (Array.isArray(snapshot.legacy?.nodes)) {
+            for (const n of snapshot.legacy.nodes) {
+              if (n.messageId === messageId && Array.isArray(n.blocks)) {
+                return n.blocks.flatMap((b: any) => (b.kind === 'text' ? [b.text] : [])).join('')
               }
             }
           }
@@ -77,10 +85,20 @@ export function ShuorenhuaButton({
           let prev = row.previousElementSibling
           while (prev) {
             const text = prev.textContent?.trim()
-            if (text && text.length > 5) {
+            if (text && text.length > 2) {
               return text
             }
             prev = prev.previousElementSibling
+          }
+          // Parent turn container fallback
+          const turnContainer = row.parentElement
+          if (turnContainer) {
+            const clone = turnContainer.cloneNode(true) as HTMLElement
+            clone.querySelectorAll('button, [data-turn-tail]').forEach(el => el.remove())
+            const text = clone.textContent?.trim()
+            if (text && text.length > 2) {
+              return text
+            }
           }
         }
       } catch {

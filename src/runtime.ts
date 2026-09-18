@@ -27,8 +27,24 @@ export async function* streamHumanize(
     throw new Error('DSH 宿主 LLM 服务未就绪，请检查模型提供方配置')
   }
 
-  // Resolve provider & model
+  // 1. Resolve provider & model from config or active DSH default model
   let provider = config.provider
+  let model = config.model
+
+  if ((!provider || !model) && (ctx as any).agentDefaultModel?.currentSelection) {
+    try {
+      const selection = (ctx as any).agentDefaultModel.currentSelection()
+      if (selection?.provider && !provider) {
+        provider = selection.provider
+      }
+      if (selection?.model && !model) {
+        model = selection.model
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   if (!provider && typeof llmService.listProviders === 'function') {
     const providers = llmService.listProviders()
     if (Array.isArray(providers) && providers.length > 0) {
@@ -37,7 +53,6 @@ export async function* streamHumanize(
   }
   provider = provider || 'deepseek-official'
 
-  let model = config.model
   if (!model && typeof llmService.listModels === 'function') {
     try {
       const models = await llmService.listModels(provider)
@@ -64,10 +79,19 @@ export async function* streamHumanize(
     signal,
   })
 
+  let hasYielded = false
   for await (const chunk of stream) {
     if (chunk.type === 'text-delta' && typeof chunk.text === 'string') {
       yield chunk.text
+      hasYielded = true
+    } else if (chunk.type === 'finish' && chunk.reason?.kind === 'error') {
+      const failureMsg = chunk.reason.failure?.message || 'LLM 调用失败'
+      throw new Error(`[${provider}/${model}] ${failureMsg}`)
     }
+  }
+
+  if (!hasYielded && !signal?.aborted) {
+    throw new Error(`[${provider}/${model}] 模型未返回任何生成文本，请检查提供方服务状态与模型配置`)
   }
 }
 
@@ -94,34 +118,34 @@ export class ShuorenhuaRuntime extends TypertRemoteService {
       for await (const delta of streamHumanize(this.ctx, text, this.config)) {
         assembled += delta
       }
-    } catch {
-      // If AI fails and offline rules are not wanted, fallback
+    } catch (err: any) {
+      throw new Error(err?.message || 'AI 润色生成失败')
     }
 
-    if (assembled.trim()) {
-      const originalLength = text.length
-      const humanizedLength = assembled.length
-      const savedPercentage = originalLength > 0
-        ? Math.max(0, Math.round(((originalLength - humanizedLength) / originalLength) * 100))
-        : 0
-
-      return {
-        text: assembled,
-        original: text,
-        mode: 'default',
-        source: 'ai',
-        stats: {
-          originalLength,
-          humanizedLength,
-          savedPercentage,
-          removedOpeners: 0,
-          removedClosers: 0,
-          replacedBuzzwords: 0,
-        },
-      }
+    if (!assembled.trim()) {
+      throw new Error('AI 返回内容为空')
     }
 
-    return humanize(text)
+    const originalLength = text.length
+    const humanizedLength = assembled.length
+    const savedPercentage = originalLength > 0
+      ? Math.max(0, Math.round(((originalLength - humanizedLength) / originalLength) * 100))
+      : 0
+
+    return {
+      text: assembled,
+      original: text,
+      mode: 'default',
+      source: 'ai',
+      stats: {
+        originalLength,
+        humanizedLength,
+        savedPercentage,
+        removedOpeners: 0,
+        removedClosers: 0,
+        replacedBuzzwords: 0,
+      },
+    }
   }
 }
 
