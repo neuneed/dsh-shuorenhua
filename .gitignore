@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Cache & Build Info
+*.tsbuildinfo
+.eslintcache
+
+# Logs & Temporary
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS & IDE
+.DS_Store
+.idea/
+.vscode/
+*.swp

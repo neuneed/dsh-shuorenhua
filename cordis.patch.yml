@@ -1,0 +1,7 @@
+# dsh-shuorenhua bundle: mounts the Shuorenhua plugin into DSH
+- insert:
+    - id: dsh-shuorenhua
+      name: dsh-shuorenhua
+      config:
+        defaultMode: natural
+        enableTool: true
