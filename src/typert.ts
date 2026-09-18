@@ -19,7 +19,7 @@ export const TYPERT_MANIFEST: TypertContribution = {
           {
             kind: 'method',
             name: 'humanize',
-            signature: 'humanize(text: string, mode?: string): Promise<HumanizeResult>',
+            signature: 'humanize(text: string): Promise<HumanizeResult>',
           },
         ],
         types: [],

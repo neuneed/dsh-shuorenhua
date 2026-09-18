@@ -1,9 +1,13 @@
 /**
- * Host Remote service implementation for dsh-shuorenhua.
+ * Host Remote service & WebServer endpoints for dsh-shuorenhua.
  */
 import type { Context } from '@deepseek-ai/cordis';
 import { TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol';
 import type { HumanizeResult, ShuorenhuaConfig } from './types.ts';
+/**
+ * Helper to execute LLM streaming generation for humanizing text.
+ */
+export declare function streamHumanize(ctx: Context, text: string, config?: ShuorenhuaConfig, signal?: AbortSignal): AsyncGenerator<string, void, unknown>;
 /**
  * Host service exporting the Shuorenhua RPC interface to Client plugins over Typert.
  */
@@ -11,17 +15,18 @@ export declare class ShuorenhuaRuntime extends TypertRemoteService {
     private readonly config;
     constructor(ctx: Context, config?: ShuorenhuaConfig);
     /**
-     * Remote method to humanize/simplify text.
+     * Remote method to humanize text (supporting real AI generation with fallback).
      * @param text - The text to transform.
-     * @param mode - Optional mode ('natural' | 'concise' | 'code_first').
      * @returns HumanizeResult with simplified text and stats.
      */
-    humanize(text: string, mode?: string): Promise<HumanizeResult>;
+    humanize(text: string): Promise<HumanizeResult>;
 }
 /**
+ * Register webserver HTTP streaming route `/api/shuorenhua/stream`.
+ * Enables the Client Web UI to stream AI rewrites in real time.
+ */
+export declare function registerShuorenhuaWebServer(ctx: Context, config?: ShuorenhuaConfig): () => void;
+/**
  * Register DSH Agent tool for LLM self-simplification and user commands.
- * @param ctx - Cordis Context.
- * @param config - Resolved configuration.
- * @returns Disposer function.
  */
 export declare function registerShuorenhuaTools(ctx: Context, config?: ShuorenhuaConfig): () => void;

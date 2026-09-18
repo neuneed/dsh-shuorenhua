@@ -1,21 +1,24 @@
 /**
  * dsh-shuorenhua — Host plugin entry for DeepSeek Harness.
  *
- * Provides Host-side Typert RPC remote service and Agent tool for text humanization.
+ * Provides Host-side Typert RPC remote service, streaming WebServer route, and Agent tool.
  */
 import type { Context } from '@deepseek-ai/cordis';
 import z from '@deepseek-ai/schemastery';
 export declare const name = "dsh-shuorenhua";
 export declare const inject: string[];
 export interface Config {
-    defaultMode?: string;
+    provider?: string;
+    model?: string;
     enableTool?: boolean;
 }
 export declare const Config: z<Schemastery.ObjectS<{
-    defaultMode: z<string, string>;
+    provider: z<string, string>;
+    model: z<string, string>;
     enableTool: z<boolean, boolean>;
 }>, Schemastery.ObjectT<{
-    defaultMode: z<string, string>;
+    provider: z<string, string>;
+    model: z<string, string>;
     enableTool: z<boolean, boolean>;
 }>>;
 /**

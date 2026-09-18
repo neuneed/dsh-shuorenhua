@@ -30,7 +30,6 @@ export const DSH_SHUORENHUA_INVOCATIONS: readonly InvocationDescriptor[] = [
     invocation: { kind: 'direct' },
     parameters: [
       jsonParam('text', 'text', 'dsh-shuorenhua#Text'),
-      jsonParam('mode', 'mode', 'dsh-shuorenhua#Mode'),
     ],
     result: strictCodec('dsh-shuorenhua#HumanizeResult'),
   },

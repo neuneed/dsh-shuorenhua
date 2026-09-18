@@ -6,12 +6,12 @@ export const NS = 'shuorenhua'
 
 export const zh = {
   'action.button': '说人话',
-  'action.tooltip': '说人话 · 去 AI 味润色',
+  'action.tooltip': '说人话 · AI 深度去味润色',
   'modal.title': '说人话 · 去 AI 味润色',
-  'modal.desc': '基于三大开源规则（shuorenhua + Humanizer-zh + 自然节律）一键消除AI空话寒暄与公文八股',
-  'mode.natural': '自然人话',
-  'mode.concise': '极简要点',
-  'mode.code_first': '程序员直球',
+  'modal.desc': '深度融合三大开源规则体系，AI 实时重写真实、通俗、无套话的自然人话',
+  'status.generating': 'AI 正在润色转化中...',
+  'status.completed': 'AI 润色完成',
+  'status.offline': '离线规则润色',
   'stats.original': '原文字数',
   'stats.humanized': '润色字数',
   'stats.saved': '精简',
@@ -23,6 +23,7 @@ export const zh = {
   'close.button': '关闭 (ESC)',
   'tab.result': '润色结果',
   'tab.diff': '对比视图',
+  'btn.regenerate': '重新润色',
   'empty.tip': '暂未获取到本轮回答的文本内容',
 }
 
@@ -30,10 +31,10 @@ export const en = {
   'action.button': 'Humanize',
   'action.tooltip': 'Speak Human · De-AI & Simplify',
   'modal.title': 'Speak Human · De-AI & Simplify',
-  'modal.desc': 'Prune AI fluff, corporate jargon, and opening/closing clichés into clean human speech.',
-  'mode.natural': 'Natural',
-  'mode.concise': 'Concise',
-  'mode.code_first': 'Code-First',
+  'modal.desc': 'Synthesized from 3 open-source humanizer rules, rewrites AI fluff into authentic human speech.',
+  'status.generating': 'AI is humanizing text...',
+  'status.completed': 'Humanized with AI',
+  'status.offline': 'Local Rule Mode',
   'stats.original': 'Original',
   'stats.humanized': 'Polished',
   'stats.saved': 'Reduced',
@@ -45,6 +46,7 @@ export const en = {
   'close.button': 'Close (ESC)',
   'tab.result': 'Result',
   'tab.diff': 'Compare',
+  'btn.regenerate': 'Regenerate',
   'empty.tip': 'No text detected for this message round.',
 }
 

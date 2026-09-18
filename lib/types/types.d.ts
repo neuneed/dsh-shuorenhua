@@ -1,12 +1,12 @@
 /**
  * Shared types for dsh-shuorenhua (说人话).
  */
-/** Supported humanization modes. */
-export type HumanizeMode = 'natural' | 'concise' | 'code_first';
+/** Supported humanization mode — unified into a single optimal mode. */
+export type HumanizeMode = 'default';
 /** Options for humanize execution. */
 export interface HumanizeOptions {
-    /** Mode of simplification. Default is 'natural'. */
-    mode?: HumanizeMode;
+    /** Mode of simplification (fixed to 'default'). */
+    mode?: string;
     /** Preserve code blocks verbatim without altering their content. Default: true. */
     preserveCode?: boolean;
 }
@@ -32,14 +32,18 @@ export interface HumanizeResult {
     /** Original input text. */
     original: string;
     /** Active mode used. */
-    mode: HumanizeMode;
+    mode?: string;
     /** Detailed statistics. */
     stats: HumanizeStats;
+    /** Whether the result was generated via AI or local fallback rules. */
+    source?: 'ai' | 'rule';
 }
 /** Plugin configuration schema for cordis. */
 export interface ShuorenhuaConfig {
-    /** Default mode when none specified. */
-    defaultMode?: HumanizeMode;
+    /** Preferred model provider (defaults to active provider or deepseek). */
+    provider?: string;
+    /** Preferred model name. */
+    model?: string;
     /** Whether to register the agent tool `shuorenhua_simplify`. Default: true. */
     enableTool?: boolean;
 }

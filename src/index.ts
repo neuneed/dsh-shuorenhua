@@ -1,12 +1,12 @@
 /**
  * dsh-shuorenhua — Host plugin entry for DeepSeek Harness.
  *
- * Provides Host-side Typert RPC remote service and Agent tool for text humanization.
+ * Provides Host-side Typert RPC remote service, streaming WebServer route, and Agent tool.
  */
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-typert-registry'
-import { registerShuorenhuaTools, ShuorenhuaRuntime } from './runtime.ts'
+import { registerShuorenhuaTools, registerShuorenhuaWebServer, ShuorenhuaRuntime } from './runtime.ts'
 import { TYPERT_MANIFEST } from './typert.ts'
 import type { ShuorenhuaConfig } from './types.ts'
 
@@ -14,12 +14,14 @@ export const name = 'dsh-shuorenhua'
 export const inject = ['typert', 'tools']
 
 export interface Config {
-  defaultMode?: string
+  provider?: string
+  model?: string
   enableTool?: boolean
 }
 
 export const Config = z.object({
-  defaultMode: z.string().default('natural'),
+  provider: z.string(),
+  model: z.string(),
   enableTool: z.boolean().default(true),
 })
 
@@ -53,7 +55,13 @@ export function apply(ctx: Context, config?: Config): void {
     }
   }, 'dsh-shuorenhua: typert manifest')
 
-  // 3. Register Agent tool if enabled
+  // 3. Register HTTP streaming endpoint on webServer (/api/shuorenhua/stream)
+  ctx.effect(
+    () => registerShuorenhuaWebServer(ctx, resolved),
+    'dsh-shuorenhua: webserver route',
+  )
+
+  // 4. Register Agent tool if enabled
   if (resolved.enableTool !== false) {
     ctx.effect(
       () => registerShuorenhuaTools(ctx, resolved),

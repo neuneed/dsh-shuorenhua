@@ -1,12 +1,12 @@
 /**
  * Pop-up Modal dialog for Shuorenhua (说人话).
- * Displays humanized text, comparison stats, mode switcher, one-click copy, and ESC dismissal.
+ * Displays real-time AI humanization with streaming typewriter output,
+ * single unified mode, comparison stats, one-click copy, and ESC dismissal.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { humanize } from '../../engine/humanizer.ts'
-import type { HumanizeMode } from '../../types.ts'
 import { ensureStylesInjected } from '../styles.ts'
 
 export interface ShuorenhuaModalProps {
@@ -22,11 +22,15 @@ export function ShuorenhuaModal({
   originalText,
   t = (k: string) => k,
 }: ShuorenhuaModalProps): React.ReactPortal | null {
-  const [mode, setMode] = useState<HumanizeMode>('natural')
+  const [streamedText, setStreamedText] = useState('')
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [isAiGenerated, setIsAiGenerated] = useState(true)
   const [copied, setCopied] = useState(false)
   const [showDiff, setShowDiff] = useState(false)
 
-  // Ensure CSS styles are present
+  const abortControllerRef = useRef<AbortController | null>(null)
+
+  // Ensure CSS styles are injected into DOM
   useEffect(() => {
     ensureStylesInjected()
   }, [])
@@ -46,21 +50,117 @@ export function ShuorenhuaModal({
     }
   }, [open, onClose])
 
-  // Compute humanized result whenever mode or text changes
-  const result = useMemo(() => {
-    return humanize(originalText, { mode })
-  }, [originalText, mode])
+  // Trigger AI streaming transformation
+  const startHumanize = useCallback(async (text: string) => {
+    if (!text || !text.trim()) {
+      setStreamedText('')
+      setIsGenerating(false)
+      return
+    }
+
+    // Abort any pending generation
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+    const controller = new AbortController()
+    abortControllerRef.current = controller
+
+    setIsGenerating(true)
+    setStreamedText('')
+    setIsAiGenerated(true)
+
+    try {
+      const response = await fetch('/api/shuorenhua/stream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ text }),
+        signal: controller.signal,
+      })
+
+      if (!response.ok || !response.body) {
+        throw new Error('Streaming endpoint not available')
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder('utf-8')
+      let buffer = ''
+      let fullText = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed.startsWith('data:')) continue
+          const jsonStr = trimmed.slice(5).trim()
+          if (!jsonStr) continue
+
+          try {
+            const data = JSON.parse(jsonStr)
+            if (data.done) {
+              // Generation completed
+              break
+            }
+            if (data.fallback) {
+              setIsAiGenerated(false)
+            }
+            if (typeof data.delta === 'string') {
+              fullText += data.delta
+              setStreamedText(fullText)
+            }
+          } catch {
+            // Ignore malformed chunks
+          }
+        }
+      }
+
+      if (!fullText.trim()) {
+        // Fallback if empty stream
+        const fallback = humanize(text)
+        setStreamedText(fallback.text)
+        setIsAiGenerated(false)
+      }
+    } catch (err: any) {
+      if (controller.signal.aborted) return
+      // Network error or offline fallback
+      const fallback = humanize(text)
+      setStreamedText(fallback.text)
+      setIsAiGenerated(false)
+    } finally {
+      if (!controller.signal.aborted) {
+        setIsGenerating(false)
+      }
+    }
+  }, [])
+
+  // Start generation on open
+  useEffect(() => {
+    if (open && originalText) {
+      startHumanize(originalText)
+    }
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
+    }
+  }, [open, originalText, startHumanize])
 
   // Copy to clipboard handler
   const handleCopy = useCallback(async () => {
-    if (!result.text) return
+    if (!streamedText) return
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        await navigator.clipboard.writeText(result.text)
+        await navigator.clipboard.writeText(streamedText)
       } else {
-        // Fallback for older/non-secure contexts
         const textarea = document.createElement('textarea')
-        textarea.value = result.text
+        textarea.value = streamedText
         textarea.style.position = 'fixed'
         textarea.style.opacity = '0'
         document.body.appendChild(textarea)
@@ -73,7 +173,14 @@ export function ShuorenhuaModal({
     } catch {
       // ignore clipboard errors
     }
-  }, [result.text])
+  }, [streamedText])
+
+  // Stats calculation
+  const originalLength = originalText?.length || 0
+  const humanizedLength = streamedText?.length || 0
+  const savedPercentage = originalLength > 0 && humanizedLength > 0 && originalLength > humanizedLength
+    ? Math.round(((originalLength - humanizedLength) / originalLength) * 100)
+    : 0
 
   if (!open || typeof document === 'undefined') return null
 
@@ -111,49 +218,38 @@ export function ShuorenhuaModal({
           </button>
         </div>
 
-        {/* Controls & Stats */}
+        {/* Controls & Generation Status */}
         <div className="srh-controls-row">
-          {/* Mode Switcher */}
-          <div className="srh-mode-tabs" role="tablist">
-            <button
-              type="button"
-              className={`srh-mode-tab ${mode === 'natural' ? 'srh-mode-tab-active' : ''}`}
-              onClick={() => setMode('natural')}
-            >
-              🌿 {t('mode.natural')}
-            </button>
-            <button
-              type="button"
-              className={`srh-mode-tab ${mode === 'concise' ? 'srh-mode-tab-active' : ''}`}
-              onClick={() => setMode('concise')}
-            >
-              ⚡ {t('mode.concise')}
-            </button>
-            <button
-              type="button"
-              className={`srh-mode-tab ${mode === 'code_first' ? 'srh-mode-tab-active' : ''}`}
-              onClick={() => setMode('code_first')}
-            >
-              💻 {t('mode.code_first')}
-            </button>
+          <div className="srh-status-badge">
+            {isGenerating ? (
+              <>
+                <span className="srh-generating-dot" />
+                <span>{t('status.generating')}</span>
+              </>
+            ) : (
+              <>
+                <span>{isAiGenerated ? '✨' : '⚙️'}</span>
+                <span>{isAiGenerated ? t('status.completed') : t('status.offline')}</span>
+              </>
+            )}
           </div>
 
           {/* Stats pills */}
           <div className="srh-stats-pills">
             <span className="srh-pill">
-              {t('stats.original')}: <b>{result.stats.originalLength}</b>
+              {t('stats.original')}: <b>{originalLength}</b>
             </span>
             <span className="srh-pill">
-              {t('stats.humanized')}: <b>{result.stats.humanizedLength}</b>
+              {t('stats.humanized')}: <b>{humanizedLength}</b>
             </span>
-            {result.stats.savedPercentage > 0 && (
+            {savedPercentage > 0 && (
               <span className="srh-pill-badge">
-                -{result.stats.savedPercentage}%
+                -{savedPercentage}%
               </span>
             )}
-            {result.stats.replacedBuzzwords > 0 && (
-              <span className="srh-pill">
-                {t('stats.buzzwords')}: <b>{result.stats.replacedBuzzwords}</b>
+            {isAiGenerated && !isGenerating && (
+              <span className="srh-pill-ai">
+                AI Powered
               </span>
             )}
           </div>
@@ -170,14 +266,20 @@ export function ShuorenhuaModal({
               <div className="srh-diff-pane">
                 <span className="srh-diff-label">
                   {t('stats.humanized')}
-                  <span className="srh-pill-badge">-{result.stats.savedPercentage}%</span>
+                  {savedPercentage > 0 && (
+                    <span className="srh-pill-badge">-{savedPercentage}%</span>
+                  )}
                 </span>
-                <div className="srh-diff-box">{result.text || t('empty.tip')}</div>
+                <div className="srh-diff-box">
+                  {streamedText || (isGenerating ? t('status.generating') : t('empty.tip'))}
+                  {isGenerating && <span className="srh-stream-cursor" />}
+                </div>
               </div>
             </div>
           ) : (
             <div className="srh-text-box">
-              {result.text || t('empty.tip')}
+              {streamedText || (isGenerating ? t('status.generating') : t('empty.tip'))}
+              {isGenerating && <span className="srh-stream-cursor" />}
             </div>
           )}
         </div>
@@ -185,9 +287,18 @@ export function ShuorenhuaModal({
         {/* Footer */}
         <div className="srh-footer">
           <div className="srh-esc-tip">
-            按 <kbd className="srh-esc-kbd">ESC</kbd> 快速退出
+            按 <kbd className="srh-esc-kbd">ESC</kbd> 退出
           </div>
           <div className="srh-btn-row">
+            <button
+              type="button"
+              className="srh-btn srh-btn-secondary"
+              onClick={() => startHumanize(originalText)}
+              disabled={isGenerating}
+              title={t('btn.regenerate')}
+            >
+              🔄 {t('btn.regenerate')}
+            </button>
             <button
               type="button"
               className="srh-btn srh-btn-secondary"
@@ -199,6 +310,7 @@ export function ShuorenhuaModal({
               type="button"
               className={`srh-btn ${copied ? 'srh-btn-copied' : 'srh-btn-primary'}`}
               onClick={handleCopy}
+              disabled={!streamedText || isGenerating}
             >
               {copied ? t('copy.copied') : `📋 ${t('copy.button')}`}
             </button>

@@ -7,9 +7,9 @@ export declare const zh: {
     'action.tooltip': string;
     'modal.title': string;
     'modal.desc': string;
-    'mode.natural': string;
-    'mode.concise': string;
-    'mode.code_first': string;
+    'status.generating': string;
+    'status.completed': string;
+    'status.offline': string;
     'stats.original': string;
     'stats.humanized': string;
     'stats.saved': string;
@@ -21,6 +21,7 @@ export declare const zh: {
     'close.button': string;
     'tab.result': string;
     'tab.diff': string;
+    'btn.regenerate': string;
     'empty.tip': string;
 };
 export declare const en: {
@@ -28,9 +29,9 @@ export declare const en: {
     'action.tooltip': string;
     'modal.title': string;
     'modal.desc': string;
-    'mode.natural': string;
-    'mode.concise': string;
-    'mode.code_first': string;
+    'status.generating': string;
+    'status.completed': string;
+    'status.offline': string;
     'stats.original': string;
     'stats.humanized': string;
     'stats.saved': string;
@@ -42,6 +43,7 @@ export declare const en: {
     'close.button': string;
     'tab.result': string;
     'tab.diff': string;
+    'btn.regenerate': string;
     'empty.tip': string;
 };
 export type ShuorenhuaKey = keyof typeof zh;

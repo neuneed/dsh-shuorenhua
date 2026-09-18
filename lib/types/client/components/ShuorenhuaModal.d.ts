@@ -1,6 +1,7 @@
 /**
  * Pop-up Modal dialog for Shuorenhua (说人话).
- * Displays humanized text, comparison stats, mode switcher, one-click copy, and ESC dismissal.
+ * Displays real-time AI humanization with streaming typewriter output,
+ * single unified mode, comparison stats, one-click copy, and ESC dismissal.
  */
 import React from 'react';
 export interface ShuorenhuaModalProps {
