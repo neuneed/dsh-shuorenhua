@@ -15,14 +15,14 @@ export declare class ShuorenhuaRuntime extends TypertRemoteService {
     private readonly config;
     constructor(ctx: Context, config?: ShuorenhuaConfig);
     /**
-     * Remote method to humanize text (supporting real AI generation with fallback).
+     * Remote method to humanize text via AI.
      * @param text - The text to transform.
      * @returns HumanizeResult with simplified text and stats.
      */
     humanize(text: string): Promise<HumanizeResult>;
 }
 /**
- * Register webserver HTTP streaming route `/api/shuorenhua/stream`.
+ * Register webserver HTTP streaming route `/shuorenhua/stream`.
  * Enables the Client Web UI to stream AI rewrites in real time.
  */
 export declare function registerShuorenhuaWebServer(ctx: Context, config?: ShuorenhuaConfig): () => void;

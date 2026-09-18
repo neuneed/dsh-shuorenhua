@@ -24,10 +24,7 @@ export async function* streamHumanize(
   }
 
   if (!llmService || typeof llmService.stream !== 'function') {
-    // Fallback: run the rule engine
-    const fallback = humanize(text)
-    yield fallback.text
-    return
+    throw new Error('DSH 宿主 LLM 服务未就绪，请检查模型提供方配置')
   }
 
   // Resolve provider & model
@@ -63,7 +60,7 @@ export async function* streamHumanize(
         content: [{ type: 'text', text }],
       },
     ],
-    temperature: 0.5,
+    temperature: 0.4,
     signal,
   })
 
@@ -86,49 +83,41 @@ export class ShuorenhuaRuntime extends TypertRemoteService {
   }
 
   /**
-   * Remote method to humanize text (supporting real AI generation with fallback).
+   * Remote method to humanize text via AI.
    * @param text - The text to transform.
    * @returns HumanizeResult with simplified text and stats.
    */
   @Remote
   async humanize(text: string): Promise<HumanizeResult> {
-    let llmService: any = null
+    let assembled = ''
     try {
-      llmService = (this.ctx.reflect as any)?.get('llm') ?? (this.ctx as any).llm
+      for await (const delta of streamHumanize(this.ctx, text, this.config)) {
+        assembled += delta
+      }
     } catch {
-      // llm not ready
+      // If AI fails and offline rules are not wanted, fallback
     }
 
-    if (llmService && typeof llmService.stream === 'function') {
-      try {
-        let assembled = ''
-        for await (const delta of streamHumanize(this.ctx, text, this.config)) {
-          assembled += delta
-        }
-        if (assembled.trim()) {
-          const originalLength = text.length
-          const humanizedLength = assembled.length
-          const savedPercentage = originalLength > 0
-            ? Math.max(0, Math.round(((originalLength - humanizedLength) / originalLength) * 100))
-            : 0
+    if (assembled.trim()) {
+      const originalLength = text.length
+      const humanizedLength = assembled.length
+      const savedPercentage = originalLength > 0
+        ? Math.max(0, Math.round(((originalLength - humanizedLength) / originalLength) * 100))
+        : 0
 
-          return {
-            text: assembled,
-            original: text,
-            mode: 'default',
-            source: 'ai',
-            stats: {
-              originalLength,
-              humanizedLength,
-              savedPercentage,
-              removedOpeners: 0,
-              removedClosers: 0,
-              replacedBuzzwords: 0,
-            },
-          }
-        }
-      } catch {
-        // AI stream failed, fall back to rule engine
+      return {
+        text: assembled,
+        original: text,
+        mode: 'default',
+        source: 'ai',
+        stats: {
+          originalLength,
+          humanizedLength,
+          savedPercentage,
+          removedOpeners: 0,
+          removedClosers: 0,
+          replacedBuzzwords: 0,
+        },
       }
     }
 
@@ -137,7 +126,7 @@ export class ShuorenhuaRuntime extends TypertRemoteService {
 }
 
 /**
- * Register webserver HTTP streaming route `/api/shuorenhua/stream`.
+ * Register webserver HTTP streaming route `/shuorenhua/stream`.
  * Enables the Client Web UI to stream AI rewrites in real time.
  */
 export function registerShuorenhuaWebServer(
@@ -156,8 +145,19 @@ export function registerShuorenhuaWebServer(
 
   return webServer.register({
     kind: 'exact',
-    path: '/api/shuorenhua/stream',
+    path: '/shuorenhua/stream',
     handler: async (req: any, res: any) => {
+      // Handle CORS preflight if any
+      res.setHeader('Access-Control-Allow-Origin', '*')
+      res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+
+      if (req.method === 'OPTIONS') {
+        res.statusCode = 204
+        res.end()
+        return
+      }
+
       if (req.method !== 'POST') {
         res.statusCode = 405
         res.end(JSON.stringify({ error: 'Method not allowed' }))
@@ -195,7 +195,7 @@ export function registerShuorenhuaWebServer(
         res.statusCode = 200
         res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
         res.setHeader('Cache-Control', 'no-cache')
-        res.write(`data: ${JSON.stringify({ delta: '', done: true })}\n\n`)
+        res.write(`data: ${JSON.stringify({ error: '待润色文本内容为空', done: true })}\n\n`)
         res.end()
         return
       }
@@ -218,9 +218,8 @@ export function registerShuorenhuaWebServer(
         res.write(`data: ${JSON.stringify({ done: true })}\n\n`)
       } catch (err: any) {
         if (!controller.signal.aborted) {
-          const fallback = humanize(text)
-          res.write(`data: ${JSON.stringify({ delta: fallback.text, fallback: true })}\n\n`)
-          res.write(`data: ${JSON.stringify({ done: true })}\n\n`)
+          const errMsg = err?.message || 'AI 润色生成失败，请重试'
+          res.write(`data: ${JSON.stringify({ error: errMsg, done: true })}\n\n`)
         }
       } finally {
         res.end()

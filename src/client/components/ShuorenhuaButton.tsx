@@ -19,13 +19,14 @@ export function ShuorenhuaButton({
   t = (k: string) => k,
 }: ShuorenhuaButtonProps): React.ReactElement {
   const [modalOpen, setModalOpen] = useState(false)
+  const [targetText, setTargetText] = useState('')
   const buttonRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
     ensureStylesInjected()
   }, [])
 
-  // 1. Try to extract message text reactively from useChat snapshot
+  // 1. Try to extract message text reactively from useChat snapshot when available
   const snapshotText = typeof useChat === 'function'
     ? useChat((snapshot: any) => {
         if (!snapshot || !snapshot.nodes || typeof snapshot.nodes.values !== 'function') {
@@ -63,12 +64,7 @@ export function ShuorenhuaButton({
       })
     : ''
 
-  // 2. Click handler with DOM fallback if snapshotText is empty
-  const handleClick = useCallback(() => {
-    setModalOpen(true)
-  }, [])
-
-  // Resolve final text: snapshotText, or DOM inspection fallback
+  // 2. Resolve final text: snapshotText, or DOM inspection fallback
   const resolveTargetText = useCallback((): string => {
     if (snapshotText && snapshotText.trim().length > 0) {
       return snapshotText
@@ -94,7 +90,12 @@ export function ShuorenhuaButton({
     return snapshotText || ''
   }, [snapshotText])
 
-  const targetText = modalOpen ? resolveTargetText() : ''
+  // Click handler: resolve text immediately and open popup
+  const handleClick = useCallback(() => {
+    const text = resolveTargetText()
+    setTargetText(text)
+    setModalOpen(true)
+  }, [resolveTargetText])
 
   return (
     <>

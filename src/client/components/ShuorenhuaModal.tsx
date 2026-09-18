@@ -6,7 +6,6 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { humanize } from '../../engine/humanizer.ts'
 import { ensureStylesInjected } from '../styles.ts'
 
 export interface ShuorenhuaModalProps {
@@ -24,7 +23,7 @@ export function ShuorenhuaModal({
 }: ShuorenhuaModalProps): React.ReactPortal | null {
   const [streamedText, setStreamedText] = useState('')
   const [isGenerating, setIsGenerating] = useState(false)
-  const [isAiGenerated, setIsAiGenerated] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
   const [showDiff, setShowDiff] = useState(false)
 
@@ -55,6 +54,7 @@ export function ShuorenhuaModal({
     if (!text || !text.trim()) {
       setStreamedText('')
       setIsGenerating(false)
+      setError(t('empty.tip'))
       return
     }
 
@@ -67,10 +67,10 @@ export function ShuorenhuaModal({
 
     setIsGenerating(true)
     setStreamedText('')
-    setIsAiGenerated(true)
+    setError(null)
 
     try {
-      const response = await fetch('/api/shuorenhua/stream', {
+      const response = await fetch('/shuorenhua/stream', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -80,7 +80,7 @@ export function ShuorenhuaModal({
       })
 
       if (!response.ok || !response.body) {
-        throw new Error('Streaming endpoint not available')
+        throw new Error(`HTTP ${response.status}: 后端服务未就绪，请先重启 dsh web 服务`)
       }
 
       const reader = response.body.getReader()
@@ -104,45 +104,42 @@ export function ShuorenhuaModal({
 
           try {
             const data = JSON.parse(jsonStr)
-            if (data.done) {
-              // Generation completed
-              break
+            if (data.error) {
+              throw new Error(data.error)
             }
-            if (data.fallback) {
-              setIsAiGenerated(false)
+            if (data.done) {
+              break
             }
             if (typeof data.delta === 'string') {
               fullText += data.delta
               setStreamedText(fullText)
             }
-          } catch {
-            // Ignore malformed chunks
+          } catch (e: any) {
+            if (e.message && e.message !== 'Unexpected token') {
+              throw e
+            }
           }
         }
       }
 
       if (!fullText.trim()) {
-        // Fallback if empty stream
-        const fallback = humanize(text)
-        setStreamedText(fallback.text)
-        setIsAiGenerated(false)
+        throw new Error('AI 返回内容为空，请点击重新润色')
       }
     } catch (err: any) {
       if (controller.signal.aborted) return
-      // Network error or offline fallback
-      const fallback = humanize(text)
-      setStreamedText(fallback.text)
-      setIsAiGenerated(false)
+      setError(err?.message || 'AI 润色请求失败，请检查服务后点击重试')
     } finally {
       if (!controller.signal.aborted) {
         setIsGenerating(false)
       }
     }
-  }, [])
+  }, [t])
 
-  // Start generation on open
+  // Automatically start humanizing whenever the modal opens
   useEffect(() => {
-    if (open && originalText) {
+    if (open) {
+      setStreamedText('')
+      setError(null)
       startHumanize(originalText)
     }
     return () => {
@@ -226,10 +223,14 @@ export function ShuorenhuaModal({
                 <span className="srh-generating-dot" />
                 <span>{t('status.generating')}</span>
               </>
+            ) : error ? (
+              <span style={{ color: '#ef4444' }}>
+                ⚠️ {error}
+              </span>
             ) : (
               <>
-                <span>{isAiGenerated ? '✨' : '⚙️'}</span>
-                <span>{isAiGenerated ? t('status.completed') : t('status.offline')}</span>
+                <span>✨</span>
+                <span>{t('status.completed')}</span>
               </>
             )}
           </div>
@@ -247,7 +248,7 @@ export function ShuorenhuaModal({
                 -{savedPercentage}%
               </span>
             )}
-            {isAiGenerated && !isGenerating && (
+            {!isGenerating && !error && streamedText && (
               <span className="srh-pill-ai">
                 AI Powered
               </span>
@@ -257,7 +258,23 @@ export function ShuorenhuaModal({
 
         {/* Content Box */}
         <div className="srh-content">
-          {showDiff ? (
+          {error ? (
+            <div className="srh-text-box" style={{ borderColor: 'rgba(239, 68, 68, 0.3)', background: 'rgba(239, 68, 68, 0.05)' }}>
+              <p style={{ margin: '0 0 12px 0', fontWeight: 600, color: '#ef4444' }}>
+                润色失败
+              </p>
+              <p style={{ margin: '0 0 16px 0', fontSize: 13, opacity: 0.85 }}>
+                {error}
+              </p>
+              <button
+                type="button"
+                className="srh-btn srh-btn-primary"
+                onClick={() => startHumanize(originalText)}
+              >
+                🔄 重新润色
+              </button>
+            </div>
+          ) : showDiff ? (
             <div className="srh-diff-grid">
               <div className="srh-diff-pane">
                 <span className="srh-diff-label">{t('stats.original')}</span>
