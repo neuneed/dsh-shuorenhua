@@ -11,7 +11,7 @@ import { TYPERT_MANIFEST } from './typert.ts'
 import type { ShuorenhuaConfig } from './types.ts'
 
 export const name = 'dsh-shuorenhua'
-export const inject = ['typert', 'tools']
+export const inject = ['llm']
 
 export interface Config {
   provider?: string
@@ -36,37 +36,44 @@ export function apply(ctx: Context, config?: Config): void {
   // 1. Instantiate the Host-side Typert service
   new ShuorenhuaRuntime(ctx, resolved)
 
-  // 2. Register Typert RPC manifest
-  ctx.effect(() => {
-    let dispose: (() => Promise<void>) | (() => void) | undefined
-    try {
-      if (ctx.typert) {
-        if (typeof (ctx.typert as any).register === 'function') {
-          dispose = (ctx.typert as any).register(TYPERT_MANIFEST)
-        } else if (ctx.typert.remotes && typeof ctx.typert.remotes.register === 'function') {
-          dispose = ctx.typert.remotes.register(TYPERT_MANIFEST as any)
+  // 2. Register Typert RPC manifest when typert service is available
+  ctx.inject(['typert'], (typertCtx) => {
+    typertCtx.effect(() => {
+      let dispose: (() => Promise<void>) | (() => void) | undefined
+      try {
+        const typert = typertCtx.get('typert')
+        if (typert) {
+          if (typeof (typert as any).register === 'function') {
+            dispose = (typert as any).register(TYPERT_MANIFEST)
+          } else if (typert.remotes && typeof (typert.remotes as any).register === 'function') {
+            dispose = (typert.remotes as any).register(TYPERT_MANIFEST as any)
+          }
         }
+      } catch {
+        // typert registry not available
       }
-    } catch {
-      // typert registry not available
-    }
-    return () => {
-      if (dispose) void dispose()
-    }
-  }, 'dsh-shuorenhua: typert manifest')
+      return () => {
+        if (dispose) void dispose()
+      }
+    }, 'dsh-shuorenhua: typert manifest')
+  })
 
-  // 3. Register HTTP streaming endpoint on webServer (/api/shuorenhua/stream)
-  ctx.effect(
-    () => registerShuorenhuaWebServer(ctx, resolved),
-    'dsh-shuorenhua: webserver route',
-  )
-
-  // 4. Register Agent tool if enabled
-  if (resolved.enableTool !== false) {
-    ctx.effect(
-      () => registerShuorenhuaTools(ctx, resolved),
-      'dsh-shuorenhua: agent tools',
+  // 3. Register HTTP streaming endpoint on webServer (/shuorenhua/stream)
+  ctx.inject(['webServer'], (webCtx) => {
+    webCtx.effect(
+      () => registerShuorenhuaWebServer(webCtx, resolved),
+      'dsh-shuorenhua: webserver route',
     )
+  })
+
+  // 4. Register Agent tool when tools service is available
+  if (resolved.enableTool !== false) {
+    ctx.inject(['tools'], (toolCtx) => {
+      toolCtx.effect(
+        () => registerShuorenhuaTools(toolCtx, resolved),
+        'dsh-shuorenhua: agent tools',
+      )
+    })
   }
 }
 

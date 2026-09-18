@@ -16,13 +16,7 @@ export async function* streamHumanize(
   config: ShuorenhuaConfig = {},
   signal?: AbortSignal,
 ): AsyncGenerator<string, void, unknown> {
-  let llmService: any = null
-  try {
-    llmService = (ctx.reflect as any)?.get('llm') ?? (ctx as any).llm
-  } catch {
-    // llm not ready
-  }
-
+  const llmService = ctx.get('llm')
   if (!llmService || typeof llmService.stream !== 'function') {
     throw new Error('DSH 宿主 LLM 服务未就绪，请检查模型提供方配置')
   }
@@ -31,9 +25,11 @@ export async function* streamHumanize(
   let provider = config.provider
   let model = config.model
 
-  if ((!provider || !model) && (ctx as any).agentDefaultModel?.currentSelection) {
+  // Safely query optional agentDefaultModel without triggering inject proxy trap
+  const defaultModelService = ctx.get('agentDefaultModel')
+  if ((!provider || !model) && defaultModelService && typeof defaultModelService.currentSelection === 'function') {
     try {
-      const selection = (ctx as any).agentDefaultModel.currentSelection()
+      const selection = defaultModelService.currentSelection()
       if (selection?.provider && !provider) {
         provider = selection.provider
       }
@@ -46,9 +42,13 @@ export async function* streamHumanize(
   }
 
   if (!provider && typeof llmService.listProviders === 'function') {
-    const providers = llmService.listProviders()
-    if (Array.isArray(providers) && providers.length > 0) {
-      provider = providers[0]?.id
+    try {
+      const providers = llmService.listProviders()
+      if (Array.isArray(providers) && providers.length > 0) {
+        provider = providers[0]?.id
+      }
+    } catch {
+      // ignore
     }
   }
   provider = provider || 'deepseek-official'
@@ -71,7 +71,9 @@ export async function* streamHumanize(
     system: HUMANIZER_SYSTEM_PROMPT,
     messages: [
       {
+        id: `msg-${Date.now()}` as any,
         role: 'user',
+        source: { kind: 'user' },
         content: [{ type: 'text', text }],
       },
     ],
@@ -84,9 +86,14 @@ export async function* streamHumanize(
     if (chunk.type === 'text-delta' && typeof chunk.text === 'string') {
       yield chunk.text
       hasYielded = true
-    } else if (chunk.type === 'finish' && chunk.reason?.kind === 'error') {
-      const failureMsg = chunk.reason.failure?.message || 'LLM 调用失败'
-      throw new Error(`[${provider}/${model}] ${failureMsg}`)
+    } else if (chunk.type === 'finish') {
+      if (chunk.reason?.kind === 'error') {
+        const failureMsg = chunk.reason.failure?.message || 'LLM 调用失败'
+        throw new Error(`[${provider}/${model}] ${failureMsg}`)
+      }
+      if (chunk.reason?.kind === 'aborted') {
+        return
+      }
     }
   }
 
@@ -157,12 +164,7 @@ export function registerShuorenhuaWebServer(
   ctx: Context,
   config: ShuorenhuaConfig = {},
 ): () => void {
-  let webServer: any = null
-  try {
-    webServer = (ctx.reflect as any)?.get('webServer') ?? (ctx as any).webServer
-  } catch {
-    // webServer not available
-  }
+  const webServer = ctx.get('webServer')
   if (!webServer || typeof webServer.register !== 'function') {
     return () => {}
   }
@@ -259,12 +261,7 @@ export function registerShuorenhuaTools(
   ctx: Context,
   config: ShuorenhuaConfig = {},
 ): () => void {
-  let toolsService: any = null
-  try {
-    toolsService = (ctx.reflect as any)?.get('tools') ?? (ctx as any).tools
-  } catch {
-    // tools service not available
-  }
+  const toolsService = ctx.get('tools')
   if (!toolsService || typeof toolsService.register !== 'function') {
     return () => {}
   }

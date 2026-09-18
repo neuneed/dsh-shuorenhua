@@ -26,7 +26,7 @@ export function apply(ctx: ClientContext): void {
   // 1. Register i18n copy dictionaries
   ctx.effect(() => {
     try {
-      const localeService = (ctx as any).locale
+      const localeService = ctx.get('locale')
       if (localeService && typeof localeService.register === 'function') {
         return localeService.register(NS, { zh, en })
       }
