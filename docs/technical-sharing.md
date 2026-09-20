@@ -309,35 +309,185 @@ DSH 架构规则明确规定：*“Registrations are effects: every contribution
 
 ---
 
-### 2.5 通信机制
+### 2.5 通信机制（深层剖析）
 
-客户端与宿主端如何通信？本项目同时包含了官方推荐的两种模式：
+在 DSH 的双端架构中，Host 宿主端（Node.js）与 Client 浏览器端（Web）运行在不同的物理上下文中。如何高效、稳定、无额外负担地进行跨端数据通信？
 
-#### 1. 同端口 WebServer SSE 流式路由（首选主通道）
-- **官方依据**：DSH 源码中 `WebRoute.handler` 明确指出支持长连接流式响应（如 Server-Sent Events）。
-- **同源无跨域**：直接借用 DSH 既有的 WebServer（默认端口 3080），无需另起一个 Express 服务或开放多余端口。
-- **客户端断连安全处理**：
-  ```ts
-  const abortController = new AbortController()
-  req.on('close', () => {
-    // 用户在浏览器关闭弹窗或刷新页面时，立即中止宿主大模型生成，节省 Token！
-    abortController.abort()
+DSH 官方提供了两种核心跨端通信通道，外加一种进程内事件机制。下面系统拆解它们的原理、官方依据、适用场景与使用频次。
+
+#### 维度一：通信模式全景对比
+
+| 模式 | 常用指数 | 核心协议 | 适用场景 | 官方依据与设计意图 |
+| :--- | :--- | :--- | :--- | :--- |
+| **① 同端口 WebServer SSE 流** | **⭐⭐⭐⭐⭐ (流式业务·最常用)** | HTTP / SSE (`text/event-stream`) | AI 生成打字机输出、实时长任务推送、增量文本流 | **官方原生支持长连接**：`WebRoute.handler` 明确允许持有连接生命周期；同源同端口（3080），零跨域，浏览器原生 `fetch` 极简消费 |
+| **② Typert API Gateway RPC** | **⭐⭐⭐⭐ (系统级交互·标准范式)** | HTTP `/api` + 强类型 JSON Envelope | 状态查询、配置写入、会话管理、一问一答一元调用 | **端到端类型图契约**：基于 `@Remote` 装饰器与编译期 Schema，提供无 Proxy 的具体类型安全 RPC，由 Connection 统一鉴权与路由 |
+| **③ 进程内 Cordis 事件总线** | **⭐⭐⭐⭐⭐ (进程内通信·黄金标准)** | 内存级 EventEmitter / Waterfall | 插件与插件间解耦通信、流水线拦截、生命周期感知 | **解耦与中间件**：提供 `emit`、`waterfall`、`parallel`、`serial`、`bail` 五种分发模式，支持洋葱圈委托 |
+
+---
+
+#### 1. 【流式交互最常用 ⭐⭐⭐⭐⭐】同端口 WebServer SSE 流式路由
+在 AI 对话与大白话润色场景中，**流式打字机体验是绝对的刚需**。用户无法容忍一段 500 字的文本等待十几秒后一次性跳出。
+
+##### 官方依据与底层原理
+查阅 DSH 官方 WebServer 文档（[`docs/subsystems/web-server.zh.md`](file:///home/asdf/dev/deepseek-harness/docs/subsystems/web-server.zh.md)）及源码：
+```ts
+interface WebRoute {
+  kind: 'exact' | 'prefix'
+  path: string
+  /** Owns the full response lifecycle (may hold the response open, e.g. SSE). */
+  handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>
+}
+```
+- **官方专门标注**：`handler` 拥有完整的响应生命周期，**明确支持保持连接打开（例如 SSE）**；
+- **同源复用 3080**：WebServer 默认监听 `127.0.0.1:3080`。插件注册的路由直接挂载在当前 Web 服务的路径树下（如 `/shuorenhua/stream`），与前端 SPA 页面完全同源，**彻底消灭了 CORS 跨域限制与端口冲突**。
+
+##### 宿主端关键实现（带客户端断连中止）
+```ts
+// src/runtime.ts
+export function registerShuorenhuaWebServer(ctx: Context, config: ShuorenhuaConfig = {}) {
+  const webServer = ctx.get('webServer')
+  if (!webServer) return () => {}
+
+  return webServer.register({
+    kind: 'exact',
+    path: '/shuorenhua/stream',
+    handler: async (req, res) => {
+      // 1. 建立 SSE 标准响应头
+      res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
+      res.setHeader('Cache-Control', 'no-cache, no-transform')
+      res.setHeader('Connection', 'keep-alive')
+      res.flushHeaders?.()
+
+      // 2. 核心精髓：监听客户端连接断开，联动中止底层大模型
+      const controller = new AbortController()
+      req.on('close', () => {
+        // 用户关闭弹窗、按 ESC 或切换页面时，立即中止宿主 LLM 生成，节省 Token！
+        controller.abort()
+      })
+
+      // 3. 消费 Host 端 ctx.llm 流并实时向浏览器推帧
+      try {
+        for await (const chunk of streamHumanize(ctx, text, config, controller.signal)) {
+          res.write(`data: ${JSON.stringify({ delta: chunk })}\n\n`)
+        }
+        res.write(`data: ${JSON.stringify({ done: true })}\n\n`)
+      } catch (err: any) {
+        if (!controller.signal.aborted) {
+          res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`)
+        }
+      } finally {
+        res.end()
+      }
+    },
   })
-  ```
-- **流式帧协议**：
-  ```http
-  Content-Type: text/event-stream
-  Cache-Control: no-cache
+}
+```
 
-  data: {"delta":"说"}\n\n
-  data: {"delta":"人"}\n\n
-  data: {"delta":"话"}\n\n
-  data: {"done":true}\n\n
-  ```
+##### 浏览器端原生流式消费
+前端不需要安装复杂的第三方库，直接使用标准浏览器原生能力消费 SSE：
+```tsx
+// src/client/components/ShuorenhuaModal.tsx
+const response = await fetch('/shuorenhua/stream', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ text }),
+  signal: abortController.signal,
+})
 
-#### 2. Typert RPC 通信（结构化回退通道）
-- DSH 具备一套基于类型图的端到端 RPC 体系（Typert）。
-- 本项目在宿主类 `ShuorenhuaRuntime` 中同样继承了 `TypertRemoteService` 并标记了 `@Remote humanize(text)`。当处于无流式长连接环境（如无网关长连接代理）时，可直接作为结构化单次调用的后备通路。
+const reader = response.body.getReader()
+const decoder = new TextDecoder('utf-8')
+let buffer = ''
+
+while (true) {
+  const { done, value } = await reader.read()
+  if (done) break
+  buffer += decoder.decode(value, { stream: true })
+  const lines = buffer.split('\n\n')
+  buffer = lines.pop() || ''
+
+  for (const line of lines) {
+    if (!line.startsWith('data: ')) continue
+    const payload = JSON.parse(line.slice(6))
+    if (payload.delta) {
+      setStreamedText(prev => prev + payload.delta) // 逐字呈现打字机效果！
+    }
+  }
+}
+```
+
+---
+
+#### 2. 【系统级交互标准 ⭐⭐⭐⭐】Typert API Gateway RPC
+DSH 内置了一套极具特色的端到端类型化 RPC 框架——**Typert**。
+
+##### 核心架构与运行机制
+查阅官方参考文档（[`docs/api-gateway.zh.md`](file:///home/asdf/dev/deepseek-harness/docs/api-gateway.zh.md)）：
+- **定义端**：宿主服务继承 `TypertRemoteService`，使用 `@Remote` 装饰器标记对 Client 导出的方法；
+- **通信通道**：底座 Connection 服务开辟统一的 `/api/<namespace>/<method>` 通信桥（基于 HTTP POST JSON），传递具名 `args` 字典，并负责会话校验与鉴权；
+- **客户端调用**：Client 挂载贡献后，直接以强类型方式发起调用：`await ctx.remote.shuorenhua.humanize(text)`。
+
+##### 本项目的双轨实践：作为结构化回退通路
+虽然前端打字机弹窗由于极速流式需求优先采用了 SSE，但在宿主层，本项目**依然完整实现了 Typert RPC 服务**（见 `src/runtime.ts`）：
+```ts
+export class ShuorenhuaRuntime extends TypertRemoteService {
+  constructor(ctx: Context, private readonly config: ShuorenhuaConfig = {}) {
+    super(ctx, 'shuorenhua')
+  }
+
+  @Remote
+  async humanize(text: string): Promise<HumanizeResult> {
+    // 聚合整段文本，返回结构化统计数据（字数、精简率等）
+    let assembled = ''
+    for await (const delta of streamHumanize(this.ctx, text, this.config)) {
+      assembled += delta
+    }
+    return {
+      text: assembled,
+      original: text,
+      stats: { originalLength: text.length, humanizedLength: assembled.length /* ... */ }
+    }
+  }
+}
+```
+- **价值**：当处于不支持长连接的代理环境、或者其他第三方插件想要通过代码直调“说人话”能力时，Typert RPC 提供了坚固可靠的结构化调用通路。
+
+---
+
+#### 3. 【进程内通信黄金标准 ⭐⭐⭐⭐⭐】Cordis 事件与洋葱圈机制
+如果通信发生在同一进程的插件之间（例如在 Host 内部观察工具结果，或拦截大模型提示词）：
+
+##### 普通广播事件 (`ctx.on`)
+```ts
+// 监听工具执行结果事件
+ctx.on('tools/result', (exec, result) => {
+  console.log(`[工具调用] ${exec.name} 完成`)
+})
+```
+
+##### 瀑布流拦截中间件 (`ctx.waterfall`)
+DSH 的大模型流和流水线常使用 `waterfall`。官方规则严格要求：**监听器必须调用 `next()` 委托给下游，否则将短路中断链路**：
+```ts
+ctx.waterfall('llm/stream', (options, next) => {
+  // 在送入大模型前篡改或追加 prompt
+  options.system = (options.system || '') + '\n追加自定义规则'
+  return next() // 必须显式委托！
+})
+```
+
+---
+
+#### 💡 通信方案选型决策树
+
+```
+两端之间需要传递什么数据？
+  ├─ 实时文字生成、逐字打字机、高频大文本流式？
+  │    └──> 【首选 ⭐⭐⭐⭐⭐】WebServer SSE（同端口 3080，原生 fetch 消费，带断连中止）
+  ├─ 一问一答、状态查询、配置写入、结构化表单？
+  │    └──> 【首选 ⭐⭐⭐⭐】Typert RPC（走 /api，强类型契约，自带鉴权与生命周期）
+  └─ 同一进程内的插件解耦通知或请求拦截？
+       ├── 普通观察通知 ──> 【首选 ⭐⭐⭐⭐⭐】`ctx.on('event', callback)`
+       └── 中间件环绕拦截 ─> 【首选 ⭐⭐⭐⭐⭐】`ctx.waterfall('event', (args, next) => next())`
+```
 
 ---
 
