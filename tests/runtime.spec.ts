@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { ShuorenhuaRuntime } from '../src/runtime.ts'
+import { ShuorenhuaRuntime } from '../src/runtime.js'
 
 describe('ShuorenhuaRuntime', () => {
   it('calls humanize method over Typert service instance', async () => {

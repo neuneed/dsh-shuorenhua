@@ -3,14 +3,14 @@
  * Transforms robotic, verbose, and buzzword-heavy AI text into clean, direct, human-friendly speech.
  */
 
-import type { HumanizeOptions, HumanizeResult, HumanizeStats } from '../types.ts'
-import { protectVerbatim, restoreVerbatim } from './placeholders.ts'
+import type { HumanizeOptions, HumanizeResult, HumanizeStats } from '../types.js'
+import { protectVerbatim, restoreVerbatim } from './placeholders.js'
 import {
   BUZZWORD_REPLACEMENTS,
   CLOSING_BOILERPLATES,
   FILLER_SENTENCES,
   OPENING_GREETINGS,
-} from './rules.ts'
+} from './rules.js'
 
 /**
  * Humanize a given text using unified rules.
@@ -37,8 +37,11 @@ export function humanize(input: string, options: HumanizeOptions = {}): Humanize
     }
   }
 
-  // 1. Protect code blocks, math, inline code, and URLs
-  const { text: protectedContent, placeholders } = protectVerbatim(rawInput)
+  // 1. Protect code blocks, math, inline code, and URLs unless disabled
+  const preserveCode = options.preserveCode !== false
+  const { text: protectedContent, placeholders } = preserveCode
+    ? protectVerbatim(rawInput)
+    : { text: rawInput, placeholders: new Map<string, string>() }
   let processed = protectedContent.trim()
   let removedOpeners = 0
   let removedClosers = 0

@@ -6,12 +6,14 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ensureStylesInjected } from '../styles.ts'
+import { ensureStylesInjected } from '../styles.js'
 
 export interface ShuorenhuaModalProps {
   open: boolean
   onClose: () => void
   originalText: string
+  /** Assistant message id; the rewrite cache is keyed by it together with the text. */
+  messageId?: string
   t?: (key: string) => string
 }
 
@@ -19,6 +21,7 @@ export function ShuorenhuaModal({
   open,
   onClose,
   originalText,
+  messageId,
   t = (k: string) => k,
 }: ShuorenhuaModalProps): React.ReactPortal | null {
   const [streamedText, setStreamedText] = useState('')
@@ -77,7 +80,7 @@ export function ShuorenhuaModal({
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ text }),
+          body: JSON.stringify({ text, messageId }),
           signal: controller.signal,
         })
 
@@ -167,21 +170,52 @@ export function ShuorenhuaModal({
         setIsGenerating(false)
       }
     }
-  }, [t])
+  }, [t, messageId])
 
-  // Automatically start humanizing whenever the modal opens
-  useEffect(() => {
-    if (open) {
-      setStreamedText('')
-      setError(null)
-      startHumanize(originalText)
+  // Look up a persisted rewrite for this message; no LLM call happens on a hit.
+  const readCachedResult = useCallback(async (text: string): Promise<string | null> => {
+    try {
+      const response = await fetch('/shuorenhua/cache/read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, messageId }),
+      })
+      if (response.ok) {
+        const data = await response.json()
+        if (typeof data?.text === 'string' && data.text) return data.text
+      }
+    } catch {
+      // Cache lookup failure is non-fatal: fall through to the stream path.
     }
+    return null
+  }, [messageId])
+
+  // Open with the cached rewrite when present; otherwise start AI streaming.
+  useEffect(() => {
+    if (!open) return
+    setStreamedText('')
+    setError(null)
+    let cancelled = false
+    readCachedResult(originalText)
+      .then((cached) => {
+        if (cancelled) return
+        if (cached) {
+          setStreamedText(cached)
+          setIsGenerating(false)
+          return
+        }
+        startHumanize(originalText)
+      })
+      .catch(() => {
+        if (!cancelled) startHumanize(originalText)
+      })
     return () => {
+      cancelled = true
       if (abortControllerRef.current) {
         abortControllerRef.current.abort()
       }
     }
-  }, [open, originalText, startHumanize])
+  }, [open, originalText, messageId, startHumanize, readCachedResult])
 
   // Copy to clipboard handler
   const handleCopy = useCallback(async () => {

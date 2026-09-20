@@ -2,7 +2,7 @@
  * Core Humanizer Rule Engine (Offline/Local Fallback).
  * Transforms robotic, verbose, and buzzword-heavy AI text into clean, direct, human-friendly speech.
  */
-import type { HumanizeOptions, HumanizeResult } from '../types.ts';
+import type { HumanizeOptions, HumanizeResult } from '../types.js';
 /**
  * Humanize a given text using unified rules.
  * @param input - Original text to humanize.

@@ -4,13 +4,38 @@
  */
 
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import { ensureStylesInjected } from '../styles.ts'
-import { ShuorenhuaModal } from './ShuorenhuaModal.tsx'
+import { ensureStylesInjected } from '../styles.js'
+import { ShuorenhuaModal } from './ShuorenhuaModal.jsx'
 
 export interface ShuorenhuaButtonProps {
   messageId?: string
   useChat?: (selector: (snapshot: any) => any) => any
   t?: (key: string) => string
+}
+
+// Original assistant text pinned per messageId.
+//
+// Why: `resolveTargetText()` derives the "原文" from the chat snapshot or a DOM
+// fallback at click time. Once a turn closes or the message is regenerated, that
+// derivation can shift and land on a sibling node (e.g. the user prompt of the
+// same turn), which is exactly the "原文变成第二次发过去的 prompt" symptom.
+// Locking the first good capture per messageId keeps the 原文 stable across
+// reopen/regenerate, and keeps the rewrite cache keyed on the same text.
+const pinnedOriginals = new Map<string, string>()
+const PINNED_CAP = 200
+
+/** First non-empty capture for a messageId wins; later opens reuse it verbatim. */
+function pinOriginal(messageId: string | undefined, text: string): string {
+  if (!messageId) return text
+  const existing = pinnedOriginals.get(messageId)
+  if (existing !== undefined) return existing
+  if (!text || !text.trim()) return text // never pin a failed capture
+  pinnedOriginals.set(messageId, text)
+  if (pinnedOriginals.size > PINNED_CAP) {
+    const oldestKey = pinnedOriginals.keys().next().value as string | undefined
+    if (oldestKey !== undefined) pinnedOriginals.delete(oldestKey)
+  }
+  return text
 }
 
 export function ShuorenhuaButton({
@@ -43,16 +68,25 @@ export function ShuorenhuaButton({
                     .join('')
                 }
               }
-              // Check turn-tail closing
+              // Check turn-tail closing — scope to THIS message's own blocks.
+              // `closing.blocks` is the whole turn (user prompt + reply), so never
+              // treat it as the "原文"; look for the blocks of the matching message.
               if (node.kind === 'turn-tail') {
-                const data = node.data
-                if (
-                  data?.closing?.finalNode?.messageId === messageId &&
-                  Array.isArray(data?.closing?.blocks)
-                ) {
-                  return data.closing.blocks
-                    .flatMap((b: any) => (b.kind === 'text' ? [b.text] : []))
-                    .join('')
+                const closing = node.data?.closing
+                if (closing?.finalNode?.messageId === messageId) {
+                  const targetBlocks =
+                    (Array.isArray(closing.finalNode.blocks) && closing.finalNode.blocks) ||
+                    (Array.isArray(closing.steps) &&
+                      closing.steps
+                        .map((s: any) => s?.data)
+                        .find((d: any) => d?.finalNode?.messageId === messageId)?.blocks) ||
+                    (Array.isArray(closing.message?.blocks) && closing.message.blocks)
+                  if (targetBlocks) {
+                    const text = targetBlocks
+                      .flatMap((b: any) => (b.kind === 'text' ? [b.text] : []))
+                      .join('')
+                    if (text.trim()) return text
+                  }
                 }
               }
             }
@@ -77,29 +111,22 @@ export function ShuorenhuaButton({
     if (snapshotText && snapshotText.trim().length > 0) {
       return snapshotText
     }
-    // Fallback: look backwards in the DOM to locate the assistant response text
+    // Fallback: locate THIS message's text bubble in the DOM. Never climb to the
+    // turn wrapper ([data-turn-tail]) — its sibling is the previous turn and its
+    // text also contains the user prompt. Walk up from the action row and take
+    // the nearest non-button sibling as the message bubble.
     if (buttonRef.current && typeof document !== 'undefined') {
       try {
-        const row = buttonRef.current.closest('[data-turn-tail]') || buttonRef.current.parentElement
-        if (row) {
-          let prev = row.previousElementSibling
-          while (prev) {
-            const text = prev.textContent?.trim()
-            if (text && text.length > 2) {
-              return text
-            }
-            prev = prev.previousElementSibling
-          }
-          // Parent turn container fallback
-          const turnContainer = row.parentElement
-          if (turnContainer) {
-            const clone = turnContainer.cloneNode(true) as HTMLElement
-            clone.querySelectorAll('button, [data-turn-tail]').forEach(el => el.remove())
-            const text = clone.textContent?.trim()
+        let cursor: HTMLElement | null = buttonRef.current.parentElement
+        for (let depth = 0; cursor && depth < 4; depth++) {
+          const sibling = cursor.previousElementSibling as HTMLElement | null
+          if (sibling && !sibling.querySelector('button')) {
+            const text = sibling.textContent?.trim()
             if (text && text.length > 2) {
               return text
             }
           }
+          cursor = cursor.parentElement
         }
       } catch {
         // fallback failed
@@ -108,12 +135,12 @@ export function ShuorenhuaButton({
     return snapshotText || ''
   }, [snapshotText])
 
-  // Click handler: resolve text immediately and open popup
+  // Click handler: resolve text immediately (pinning it per messageId) and open popup
   const handleClick = useCallback(() => {
-    const text = resolveTargetText()
+    const text = messageId ? pinOriginal(messageId, resolveTargetText()) : resolveTargetText()
     setTargetText(text)
     setModalOpen(true)
-  }, [resolveTargetText])
+  }, [resolveTargetText, messageId])
 
   return (
     <>
@@ -134,6 +161,7 @@ export function ShuorenhuaButton({
           open={modalOpen}
           onClose={() => setModalOpen(false)}
           originalText={targetText}
+          messageId={messageId}
           t={t}
         />
       )}

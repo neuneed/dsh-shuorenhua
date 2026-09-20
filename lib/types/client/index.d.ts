@@ -3,7 +3,7 @@
  * Injects the "说人话" button into `conversation.chat.assistant-actions`.
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client';
-import { type ShuorenhuaKey } from './locales.ts';
+import { type ShuorenhuaKey } from './locales.js';
 export declare const name = "dsh-shuorenhua";
 export declare const inject: string[];
 declare module '@deepseek-ai/dsh-client-ui-slots' {
@@ -16,6 +16,6 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
  * @param ctx - Browser Client root context.
  */
 export declare function apply(ctx: ClientContext): void;
-export { ShuorenhuaButton } from './components/ShuorenhuaButton.tsx';
-export { ShuorenhuaModal } from './components/ShuorenhuaModal.tsx';
-export * from './locales.ts';
+export { ShuorenhuaButton } from './components/ShuorenhuaButton.jsx';
+export { ShuorenhuaModal } from './components/ShuorenhuaModal.jsx';
+export * from './locales.js';

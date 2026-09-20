@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { humanize } from '../src/engine/humanizer.ts'
+import { humanize } from '../src/engine/humanizer.js'
 
 describe('humanizer', () => {
   it('handles empty input gracefully', () => {

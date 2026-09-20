@@ -168,29 +168,27 @@ ctx.effect(() => {
 ---
 
 ##### 1. 【最常用 ⭐⭐⭐⭐⭐】静态强依赖声明 (`export const inject = [...]`)
-这是 DSH 插件开发中 **90% 场景下的首选**。
-- **代码范例**：
-  - **Host 宿主端入口**（[`src/index.ts`](../src/index.ts)）：
-    ```ts
-    export const name = 'dsh-shuorenhua'
-    // 宿主强依赖：必须等待大语言模型服务就绪
-    export const inject = ['llm']
+这是 DSH 插件开发中 **90% 场景下的首选**：核心功能缺了某个基础服务就无法工作，就用静态 `inject` 让 Cordis 保证加载顺序、替你消除判空。
+- **代码范例 —— Client 浏览器端入口**（[`src/client/index.tsx`](../src/client/index.tsx)）：
+  ```ts
+  export const name = 'dsh-shuorenhua'
+  // 前端强依赖：必须等待 UI 插槽与国际化服务就绪
+  export const inject = ['slots', 'locale']
 
-    export function apply(ctx: Context) {
-      // 此时 ctx.llm 100% 就绪且类型安全，无需任何判空！
-      console.log('LLM service ready:', ctx.llm)
-    }
-    ```
-  - **Client 浏览器端入口**（[`src/client/index.tsx`](../src/client/index.tsx)）：
-    ```ts
-    export const name = 'dsh-shuorenhua'
-    // 前端强依赖：必须等待 UI 插槽与国际化服务就绪
-    export const inject = ['slots', 'locale']
-
-    export function apply(ctx: ClientContext) {
-      // 此时 ctx.slots 和 ctx.locale 均已就绪
-    }
-    ```
+  export function apply(ctx: ClientContext) {
+    // 此时 ctx.slots 和 ctx.locale 均已就绪
+  }
+  ```
+- **反面教材 —— 本插件 Host 入口为何「刻意不写」静态 inject**（[`src/index.ts`](../src/index.ts)）：
+  ```ts
+  export const name = 'dsh-shuorenhua'
+  // ⚠️ 陷阱演示：可选服务绝不能放进静态 inject，否则插件一直 PENDING
+  // export const inject = ['llm']   // ← 不要这样写
+  export function apply(ctx: Context, config: Config) {
+    // AI 润色路径内部才探测 llm
+  }
+  ```
+  因为 `llm` 对本插件是**可选服务**：纯规则引擎的 `shuorenhua_simplify` 工具、Typert manifest、Web 路由，在无模型的环境里也要正常可用。一旦把 `llm` 写进静态 `inject`，插件会长期卡在 `PENDING`，**连不需要 LLM 的功能一起被 gate 死**。正确姿势：仅 AI 润色路径内部用 `ctx.get('llm')`（见模式③）安全探测，缺模型时友好报错，其余能力照常工作。
 - **工作机制（官方规范）**：
   1. Cordis 在加载插件模块前，首先静态读取导出的 `inject` 数组；
   2. 如果数组中有任何一个服务未就绪，Fiber 状态保持为 `PENDING`，`apply` 压根不会被调用；
@@ -351,6 +349,7 @@ interface WebRoute {
 ```
 - **官方专门标注**：`handler` 拥有完整的响应生命周期，**明确支持保持连接打开（例如 SSE）**；
 - **同源复用 3080**：WebServer 默认监听 `127.0.0.1:3080`。插件注册的路由直接挂载在当前 Web 服务的路径树下（如 `/shuorenhua/stream`），与前端 SPA 页面完全同源，**彻底消灭了 CORS 跨域限制与端口冲突**。
+- **同源守卫（本项目）**：既然前端同源调用，路由**不设任何 CORS 头**，并校验 POST 请求的 `Origin` 必须与 `Host` 一致（浏览器 POST 必带 `Origin`），跨站第三方页面直接 403——**防止恶意页面跨站调用这个会真实消耗你模型额度的接口**。无 `Origin` 的 CLI 工具（curl）不受影响。
 
 ##### 宿主端关键实现（带客户端断连中止）
 ```ts
@@ -431,6 +430,12 @@ while (true) {
 }
 ```
 
+##### 结果本地缓存（可选 · `storage-domain` seam）
+润色结果默认持久化到 DSH 的 `ctx.storageDomain`（storage-json/sqlite），重开同一消息**直接显示上次结果、不再调模型**：
+- **定位键**：`messageId`（无 id 时回退为原文哈希）映射到一条 `{ original, text, ts }` 记录；读取时校验 `record.original === 当前原文` —— 同一消息被重新生成后内容变了，缓存自动作废重新润色；
+- **回路**：新增 `POST /shuorenhua/cache/read`（命中返回缓存文本，绝不触 LLM）；`/shuorenhua/stream` 成功完成后把结果写回缓存；两者共用同一套同源守卫；
+- **优雅降级**：宿主端用 **动态 `import()`** 按需加载 `dsh-storage-domain` 与 `zod`，profile 没装或没配置 `storageDomain` 时缓存自动关闭，插件其余功能照常；`cacheMaxEntries` 超出后按 ts 做 LRU 逐出。
+
 ---
 
 #### 2. 【系统级交互标准 ⭐⭐⭐⭐】Typert API Gateway RPC
@@ -481,14 +486,15 @@ ctx.on('tools/result', (exec, result) => {
 ```
 
 ##### 瀑布流拦截中间件 (`ctx.waterfall`)
-DSH 的大模型流和流水线常使用 `waterfall`。官方规则严格要求：**监听器必须调用 `next()` 委托给下游，否则将短路中断链路**：
+DSH 的大模型流和流水线常使用 `waterfall`。官方规则严格要求：**监听器必须调用 `next()` 委托给下游，否则将短路中断链路**。以 `llm/stream`（包装底层模型流）为例：
 ```ts
 ctx.waterfall('llm/stream', (options, next) => {
-  // 在送入大模型前篡改或追加 prompt
-  options.system = (options.system || '') + '\n追加自定义规则'
-  return next() // 必须显式委托！
+  // options 是本次请求的 GenerateOptions；next() 返回送入模型并流回的 chunk 迭代器
+  // 典型用途：超时兜底、失败重试、Token 计量、上报追踪
+  return next() // 必须显式委托！不调用 next() = 短路，模型流会被整个吞掉
 })
 ```
+> ⚠️ **改系统提示词别在这里做**：`llm/stream` 的 `options.system` 只对**手工单次调用**（如本插件 `streamHumanize`）生效；Agent 循环的系统提示词是以系统角色消息进入请求的，此时 `options.system` 恒为 `undefined`。要改动/追加 Agent 的系统提示词，应使用真正的装配瀑布 **`system-prompt/assemble`**（作用域过滤、返回权威装配结果）。
 
 ---
 
@@ -551,8 +557,9 @@ export function ShuorenhuaButton({ messageId }: { messageId?: string }) {
 
 1. **第一步：配置 `package.json`**：声明 `dsh.bundle.patch` 与 `dsh.client`，指定宿主入口和前端微模块注入配置。
 2. **第二步：编写 Host 入口 `src/index.ts`**：
-   - 导出 `name` 与必需的 `inject`；
-   - 在 `apply(ctx)` 中通过 `ctx.effect` 与 `ctx.inject(['webServer'])` 进行有保障的资源挂载。
+   - 导出 `name` 与 `apply(ctx, config)`；
+   - 只有无法或缺的基础服务才写静态 `inject`；**可选/环境相关服务一律用 `ctx.inject(['xxx'], (ctx) => ...)` 动态注入**（如仅 Web 下存在的 `webServer`）；
+   - 所有注册统一包进 `ctx.effect`，资源清理交给 effect 的 Disposer，绝不手动 removeListener。
 3. **第三步：编写 Client 入口 `src/client/index.tsx`**：
    - 注入 UI 插槽（如 `assistant-actions`）；
    - 挂载国际化词条到 `ctx.locale`。

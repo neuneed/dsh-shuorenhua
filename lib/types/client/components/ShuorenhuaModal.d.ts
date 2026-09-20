@@ -8,6 +8,8 @@ export interface ShuorenhuaModalProps {
     open: boolean;
     onClose: () => void;
     originalText: string;
+    /** Assistant message id; the rewrite cache is keyed by it together with the text. */
+    messageId?: string;
     t?: (key: string) => string;
 }
-export declare function ShuorenhuaModal({ open, onClose, originalText, t, }: ShuorenhuaModalProps): React.ReactPortal | null;
+export declare function ShuorenhuaModal({ open, onClose, originalText, messageId, t, }: ShuorenhuaModalProps): React.ReactPortal | null;

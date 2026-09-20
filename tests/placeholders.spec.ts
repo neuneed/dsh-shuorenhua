@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { protectVerbatim, restoreVerbatim } from '../src/engine/placeholders.ts'
+import { protectVerbatim, restoreVerbatim } from '../src/engine/placeholders.js'
 
 describe('placeholders', () => {
   it('protects and restores code blocks verbatim', () => {

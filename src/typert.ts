@@ -2,7 +2,7 @@
  * Host Typert model manifest for the shuorenhua Remote.
  */
 import type { TypertContribution } from '@deepseek-ai/dsh-typert-registry/types'
-import { DSH_SHUORENHUA_INVOCATIONS } from './contract.ts'
+import { DSH_SHUORENHUA_INVOCATIONS } from './contract.js'
 
 export const TYPERT_MANIFEST: TypertContribution = {
   package: 'dsh-shuorenhua',

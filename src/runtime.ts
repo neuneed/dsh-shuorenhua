@@ -3,9 +3,14 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
-import { humanize } from './engine/humanizer.ts'
-import { HUMANIZER_SYSTEM_PROMPT } from './engine/prompt.ts'
-import type { HumanizeResult, ShuorenhuaConfig } from './types.ts'
+import { humanize } from './engine/humanizer.js'
+import { HUMANIZER_SYSTEM_PROMPT } from './engine/prompt.js'
+import type { HumanizeResult, ShuorenhuaConfig } from './types.js'
+import {
+  humanizeCacheKey,
+  isFreshCacheRecord,
+  type ShuorenhuaCacheHolder,
+} from './cache.js'
 
 /**
  * Helper to execute LLM streaming generation for humanizing text.
@@ -156,66 +161,120 @@ export class ShuorenhuaRuntime extends TypertRemoteService {
   }
 }
 
+/** Shared leak-free response helpers for the streaming and cache routes. */
+
+/** Reject cross-origin POSTs; returns `true` when the request was already answered. */
+function rejectCrossOrigin(req: any, res: any): boolean {
+  // Same-origin guard: the Web UI calls these routes same-origin (no CORS
+  // headers are sent). Browsers set `Origin` on every POST; a mismatching
+  // origin is a third-party page trying to reach these LLM-backed endpoints.
+  // Non-browser clients (curl) send no Origin and pass.
+  const origin = req.headers?.origin
+  if (origin) {
+    let originHost: string | undefined
+    try {
+      originHost = new URL(origin).hostname
+    } catch {
+      originHost = undefined
+    }
+    const ownHost = (req.headers?.host ?? '').split(':')[0]
+    if (!ownHost || !originHost || originHost !== ownHost) {
+      res.statusCode = 403
+      res.end(JSON.stringify({ error: 'Cross-origin request rejected' }))
+      return true
+    }
+  }
+  return false
+}
+
+/** Read and JSON-parse a POST body; writes the error response and returns `null` on failure. */
+async function readJsonBody(req: any, res: any): Promise<Record<string, unknown> | null> {
+  if (req.method !== 'POST') {
+    res.statusCode = 405
+    res.end(JSON.stringify({ error: 'Method not allowed' }))
+    return null
+  }
+  let bodyText = ''
+  try {
+    for await (const chunk of req) {
+      bodyText += chunk
+      if (bodyText.length > 512 * 1024) {
+        res.statusCode = 413
+        res.end(JSON.stringify({ error: 'Payload too large' }))
+        return null
+      }
+    }
+  } catch {
+    res.statusCode = 400
+    res.end(JSON.stringify({ error: 'Failed to read request body' }))
+    return null
+  }
+  try {
+    const parsed = JSON.parse(bodyText)
+    return parsed && typeof parsed === 'object'
+      ? parsed as Record<string, unknown>
+      : {}
+  } catch {
+    res.statusCode = 400
+    res.end(JSON.stringify({ error: 'Invalid JSON body' }))
+    return null
+  }
+}
+
 /**
- * Register webserver HTTP streaming route `/shuorenhua/stream`.
- * Enables the Client Web UI to stream AI rewrites in real time.
+ * Register webserver HTTP routes for dsh-shuorenhua:
+ *   - `/shuorenhua/stream`      SSE rewrite streaming (LLM-backed)
+ *   - `/shuorenhua/cache/read`  cached-rewrite lookup (no LLM involved)
+ * @param ctx - Cordis Context with `webServer` available.
+ * @param config - Plugin configuration.
+ * @param cacheRef - Holder updated once the storage-domain cache mounts; drives
+ * the cache read/write paths. Safe to keep the default (cache simply off).
  */
 export function registerShuorenhuaWebServer(
   ctx: Context,
   config: ShuorenhuaConfig = {},
+  cacheRef: ShuorenhuaCacheHolder = { current: null },
 ): () => void {
   const webServer = ctx.get('webServer')
   if (!webServer || typeof webServer.register !== 'function') {
     return () => {}
   }
 
-  return webServer.register({
+  const disposers: Array<() => void> = []
+
+  // 1. Cache-read endpoint: returns the persisted rewrite for (messageId, text)
+  disposers.push(webServer.register({
+    kind: 'exact',
+    path: '/shuorenhua/cache/read',
+    handler: async (req: any, res: any) => {
+      res.setHeader('Content-Type', 'application/json; charset=utf-8')
+      if (rejectCrossOrigin(req, res)) return
+      const body = await readJsonBody(req, res)
+      if (!body) return
+      const text = typeof body.text === 'string' ? body.text : ''
+      const messageId = typeof body.messageId === 'string' ? body.messageId : undefined
+
+      const record = cacheRef.current?.read(humanizeCacheKey(messageId, text))
+      if (isFreshCacheRecord(record, text)) {
+        res.statusCode = 200
+        res.end(JSON.stringify({ cached: true, text: record.text }))
+        return
+      }
+      res.statusCode = 200
+      res.end(JSON.stringify({ cached: false, text: null }))
+    },
+  }))
+
+  // 2. SSE rewrite streaming endpoint
+  disposers.push(webServer.register({
     kind: 'exact',
     path: '/shuorenhua/stream',
     handler: async (req: any, res: any) => {
-      // Handle CORS preflight if any
-      res.setHeader('Access-Control-Allow-Origin', '*')
-      res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
-
-      if (req.method === 'OPTIONS') {
-        res.statusCode = 204
-        res.end()
-        return
-      }
-
-      if (req.method !== 'POST') {
-        res.statusCode = 405
-        res.end(JSON.stringify({ error: 'Method not allowed' }))
-        return
-      }
-
-      // Read JSON body
-      let bodyText = ''
-      try {
-        for await (const chunk of req) {
-          bodyText += chunk
-          if (bodyText.length > 512 * 1024) {
-            res.statusCode = 413
-            res.end(JSON.stringify({ error: 'Payload too large' }))
-            return
-          }
-        }
-      } catch {
-        res.statusCode = 400
-        res.end(JSON.stringify({ error: 'Failed to read request body' }))
-        return
-      }
-
-      let text = ''
-      try {
-        const parsed = JSON.parse(bodyText)
-        text = typeof parsed.text === 'string' ? parsed.text : ''
-      } catch {
-        res.statusCode = 400
-        res.end(JSON.stringify({ error: 'Invalid JSON body' }))
-        return
-      }
+      if (rejectCrossOrigin(req, res)) return
+      const body = await readJsonBody(req, res)
+      if (!body) return
+      const text = typeof body.text === 'string' ? body.text : ''
+      const messageId = typeof body.messageId === 'string' ? body.messageId : undefined
 
       if (!text.trim()) {
         res.statusCode = 200
@@ -236,12 +295,30 @@ export function registerShuorenhuaWebServer(
         controller.abort()
       })
 
+      let assembled = ''
       try {
         for await (const delta of streamHumanize(ctx, text, config, controller.signal)) {
           if (controller.signal.aborted) break
+          assembled += delta
           res.write(`data: ${JSON.stringify({ delta })}\n\n`)
         }
         res.write(`data: ${JSON.stringify({ done: true })}\n\n`)
+
+        // Persist a successful rewrite for this exact message + source text.
+        if (!controller.signal.aborted && assembled.trim()) {
+          const cache = cacheRef.current
+          if (cache) {
+            void cache
+              .persist(humanizeCacheKey(messageId, text), {
+                original: text,
+                text: assembled,
+                ts: Date.now(),
+              })
+              .catch(() => {
+                // Cache writes are best-effort; never break the stream response.
+              })
+          }
+        }
       } catch (err: any) {
         if (!controller.signal.aborted) {
           const errMsg = err?.message || 'AI 润色生成失败，请重试'
@@ -251,16 +328,18 @@ export function registerShuorenhuaWebServer(
         res.end()
       }
     },
-  })
+  }))
+
+  return () => {
+    for (const dispose of disposers) dispose()
+  }
 }
 
 /**
  * Register DSH Agent tool for LLM self-simplification and user commands.
+ * The tool runs the local rule engine, so it needs no LLM config.
  */
-export function registerShuorenhuaTools(
-  ctx: Context,
-  config: ShuorenhuaConfig = {},
-): () => void {
+export function registerShuorenhuaTools(ctx: Context): () => void {
   const toolsService = ctx.get('tools')
   if (!toolsService || typeof toolsService.register !== 'function') {
     return () => {}
@@ -288,8 +367,8 @@ export function registerShuorenhuaTools(
     },
     isConcurrencySafe: () => true,
     presentCall: () => ({
-      card: 'generic' as const,
-      kind: 'transform' as const,
+      card: 'generic',
+      kind: 'other',
       title: '说人话润色',
     }),
     async execute(args: { text: string }) {

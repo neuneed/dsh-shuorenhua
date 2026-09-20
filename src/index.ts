@@ -6,23 +6,31 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-typert-registry'
-import { registerShuorenhuaTools, registerShuorenhuaWebServer, ShuorenhuaRuntime } from './runtime.ts'
-import { TYPERT_MANIFEST } from './typert.ts'
-import type { ShuorenhuaConfig } from './types.ts'
+import { registerShuorenhuaTools, registerShuorenhuaWebServer, ShuorenhuaRuntime } from './runtime.js'
+import { TYPERT_MANIFEST } from './typert.js'
+import type { ShuorenhuaConfig } from './types.js'
+import { openShuorenhuaCache, type ShuorenhuaCacheHolder } from './cache.js'
 
 export const name = 'dsh-shuorenhua'
-export const inject = ['llm']
+// No top-level inject: `llm` is optional (probing via ctx.get in streamHumanize),
+// and the rule-based tool works without any LLM provider.
 
 export interface Config {
   provider?: string
   model?: string
   enableTool?: boolean
+  /** Durable per-message humanize cache (via ctx.storageDomain). Default: true. */
+  enableCache?: boolean
+  /** Soft LRU cap on cached rewrites. Default: 100. */
+  cacheMaxEntries?: number
 }
 
 export const Config = z.object({
   provider: z.string(),
   model: z.string(),
   enableTool: z.boolean().default(true),
+  enableCache: z.boolean().default(true),
+  cacheMaxEntries: z.number().default(100),
 })
 
 /**
@@ -58,10 +66,32 @@ export function apply(ctx: Context, config?: Config): void {
     }, 'dsh-shuorenhua: typert manifest')
   })
 
-  // 3. Register HTTP streaming endpoint on webServer (/shuorenhua/stream)
+  // 3. Register HTTP routes on webServer (/shuorenhua/stream, /shuorenhua/cache/read)
+  const cacheHolder: ShuorenhuaCacheHolder = { current: null }
+
+  // Optional: durable per-message cache backed by ctx.storageDomain
+  if (resolved.enableCache !== false) {
+    ctx.inject(['storageDomain'], (cacheCtx) => {
+      cacheCtx.effect(
+        async () => {
+          const cache = await openShuorenhuaCache(cacheCtx, resolved.cacheMaxEntries ?? 100)
+          if (!cache) return () => {} // storage seat unavailable: noop disposer
+          cacheHolder.current = cache
+          return () => {
+            cacheHolder.current = null
+            void cache.close().catch(() => {
+              // best-effort close; the facility also closes leftovers on unmount
+            })
+          }
+        },
+        'dsh-shuorenhua: humanize cache',
+      )
+    })
+  }
+
   ctx.inject(['webServer'], (webCtx) => {
     webCtx.effect(
-      () => registerShuorenhuaWebServer(webCtx, resolved),
+      () => registerShuorenhuaWebServer(webCtx, resolved, cacheHolder),
       'dsh-shuorenhua: webserver route',
     )
   })
@@ -70,13 +100,13 @@ export function apply(ctx: Context, config?: Config): void {
   if (resolved.enableTool !== false) {
     ctx.inject(['tools'], (toolCtx) => {
       toolCtx.effect(
-        () => registerShuorenhuaTools(toolCtx, resolved),
+        () => registerShuorenhuaTools(toolCtx),
         'dsh-shuorenhua: agent tools',
       )
     })
   }
 }
 
-export * from './engine/humanizer.ts'
-export * from './runtime.ts'
-export * from './types.ts'
+export * from './engine/humanizer.js'
+export * from './runtime.js'
+export * from './types.js'

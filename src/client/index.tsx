@@ -6,8 +6,8 @@
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-slots'
-import { ShuorenhuaButton } from './components/ShuorenhuaButton.tsx'
-import { en, NS, zh, type ShuorenhuaKey } from './locales.ts'
+import { ShuorenhuaButton } from './components/ShuorenhuaButton.jsx'
+import { en, NS, zh, type ShuorenhuaKey } from './locales.js'
 
 export const name = 'dsh-shuorenhua'
 export const inject = ['slots', 'locale']
@@ -50,6 +50,6 @@ export function apply(ctx: ClientContext): void {
   )
 }
 
-export { ShuorenhuaButton } from './components/ShuorenhuaButton.tsx'
-export { ShuorenhuaModal } from './components/ShuorenhuaModal.tsx'
-export * from './locales.ts'
+export { ShuorenhuaButton } from './components/ShuorenhuaButton.jsx'
+export { ShuorenhuaModal } from './components/ShuorenhuaModal.jsx'
+export * from './locales.js'

@@ -5,8 +5,8 @@
  *   - lib/index.js    host plugin (ESM, Node 22) — loaded by the cordis.patch.yml row
  *   - lib/client.js   client plugin (CJS, browser) — loaded by the Web harness module loader
  *
- * `@deepseek-ai/*` and `react` are externalized: the harness provides them at
- * runtime. Everything else is bundled.
+ * `@deepseek-ai/*`, `react`, and `zod` are externalized: the harness provides
+ * them at runtime. Everything else is bundled.
  * Declaration files are emitted separately by `tsc -p tsconfig.build.json`.
  */
 import { build } from 'esbuild'
@@ -23,7 +23,7 @@ await build({
   platform: 'node',
   target: ['node22'],
   sourcemap: true,
-  external: dshExternal,
+  external: [...dshExternal, 'zod', 'zod/v4'],
   logLevel: 'info',
 })
 

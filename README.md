@@ -33,6 +33,7 @@
 - 🤖 **双模可用**：
   - **用户交互模式 (Web UI)**：前端点选操作；
   - **智能体模式 (Agent Tool)**：自动向自主智能体注册 `shuorenhua_simplify` 工具，Agent 也可在思考时自主调用。
+- 💾 **润色结果本地缓存**：每条消息的润色结果持久化在 Host 存储（`ctx.storageDomain`，storage-json/sqlite），再次点开同一消息直接显示上次结果，**零重复 API 调用**，节省模型额度。
 - 🔌 **零额外网络端口**：完全复用 DSH 既有的 WebServer，同源无跨域，无需开启多余端口或进程。
 
 ---
@@ -123,6 +124,10 @@ pnpm dsh web --patch cordis.patch.yml
         model: deepseek-chat
         # 可选：是否向 Agent 注册 shuorenhua_simplify 工具（默认 true）
         enableTool: true
+        # 可选：是否持久化每条消息的润色结果，重开同一消息直接显示、不再调模型（默认 true）
+        enableCache: true
+        # 可选：缓存条数上限（LRU 逐出，默认 100）
+        cacheMaxEntries: 100
 ```
 
 ---

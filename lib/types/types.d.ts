@@ -46,4 +46,8 @@ export interface ShuorenhuaConfig {
     model?: string;
     /** Whether to register the agent tool `shuorenhua_simplify`. Default: true. */
     enableTool?: boolean;
+    /** Whether to persist per-message humanize results via `ctx.storageDomain`. Default: true. */
+    enableCache?: boolean;
+    /** Soft LRU cap on cached rewrites. Default: 100. */
+    cacheMaxEntries?: number;
 }

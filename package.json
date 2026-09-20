@@ -76,11 +76,13 @@
     "@deepseek-ai/cordis": "*",
     "@deepseek-ai/dsh-typert-protocol": "*",
     "@deepseek-ai/dsh-typert-registry": "*",
+    "@deepseek-ai/dsh-storage-domain": "*",
     "@deepseek-ai/dsh-client-runtime": "*",
     "@deepseek-ai/dsh-client-ui-slots": "*",
     "@deepseek-ai/dsh-client-locale": "*",
     "@deepseek-ai/dsh-client-ui-primitives": "*",
-    "react": "^18.2.0"
+    "react": "^18.2.0",
+    "zod": "^4.0.0"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": {
@@ -90,6 +92,9 @@
       "optional": true
     },
     "@deepseek-ai/dsh-typert-registry": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-storage-domain": {
       "optional": true
     },
     "@deepseek-ai/dsh-client-runtime": {
@@ -106,10 +111,14 @@
     },
     "react": {
       "optional": true
+    },
+    "zod": {
+      "optional": true
     }
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/dsh-storage-domain": "0.1.0-rc.8",
     "@deepseek-ai/dsh-client-locale": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-runtime": "0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-primitives": "0.1.0-rc.6",
@@ -117,6 +126,7 @@
     "@deepseek-ai/dsh-typert-protocol": "0.1.0-rc.6",
     "@deepseek-ai/dsh-typert-registry": "0.1.0-rc.6",
     "@deepseek-ai/schemastery": "3.18.1",
+    "zod": "4.6.5",
     "@eslint/js": "^9.30.0",
     "@types/node": "^22.19.0",
     "@types/react": "^18.3.0",

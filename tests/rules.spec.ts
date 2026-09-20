@@ -3,7 +3,7 @@ import {
   BUZZWORD_REPLACEMENTS,
   CLOSING_BOILERPLATES,
   OPENING_GREETINGS,
-} from '../src/engine/rules.ts'
+} from '../src/engine/rules.js'
 
 describe('rules', () => {
   it('matches common opening greetings', () => {
