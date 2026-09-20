@@ -67,3 +67,98 @@ export const FILLER_SENTENCES: RegExp[] = [
   /随着[^，,\n]*(飞速发展|迅猛发展|日益普及|不断进步|广泛应用)[^，,\n]*[，,]/g,
   /在(这个|如今)[^，,\n]*(时代|背景下)[，,]/g,
 ]
+
+/** Meta-commentary and transition fillers to strip directly (MrGeDiao/shuorenhua). */
+export const META_FILLERS: RegExp[] = [
+  /(?<=[，。！？\n\s]|^)(?:值得注意的(?:是|点在于)|需要(?:指出|说明|强调)的是|简而言之|综上所述|总而言之|总的来说|总的来看|由此可见|毫无疑问(?:的是)?|显而易见(?:的是)?|毋庸置疑(?:的是)?|不言而喻(?:的是)?)[，,]?\s*/g,
+]
+
+/**
+ * De-nominalization rules: convert bureaucratic "完成了对X的调整" into natural "调整了X" (MrGeDiao/shuorenhua).
+ */
+export function applyDenominalization(text: string): string {
+  const actions = '调整|修改|优化|更新|重构|重写|检查|测试|梳理|重命名|修复|排查|改造|适配|升级|验证|上线|发布|清理|对齐|迁移|核对|替换'
+
+  // 1. (本次|本轮)? (我们|已|已经)? 完成了对 X 的 (调整|修改...)
+  const denomRegex1 = new RegExp(
+    `(?<=[，。！？\\n\\s]|^)((?:本次|本轮)?\\s*(?:我们|已|已经)?)\\s*(?:完成|进行|实现)了对\\s*([^，。！？\\n]+?)\\s*的\\s*(${actions})`,
+    'g',
+  )
+  let res = text.replace(denomRegex1, (_match, subject, target, action) => {
+    let sub = subject ? subject.replace(/我们/, '').trim() : ''
+    if (sub) sub = `${sub}`
+    return `${sub}${action}了${target}`
+  })
+
+  // 2. 对 X 进行了 (调整|修改...)
+  const denomRegex2 = new RegExp(
+    `(?<=[，。！？\\n\\s]|^)((?:本次|本轮)?\\s*(?:我们|已|已经)?)\\s*对\\s*([^，。！？\\n]+?)\\s*进行(?:了)?\\s*(${actions})`,
+    'g',
+  )
+  res = res.replace(denomRegex2, (_match, subject, target, action) => {
+    let sub = subject ? subject.replace(/我们/, '').trim() : ''
+    if (sub) sub = `${sub}`
+    return `${sub}${action}了${target}`
+  })
+
+  // 3. 实现了 X 的显著下降/提升 -> X显著下降/提升
+  const denomRegex3 = new RegExp(
+    `(?<=[，。！？\\n\\s]|^)(本次|本轮)?\\s*实现了\\s*([^，。！？\\n]+?)\\s*的\\s*(显著|大幅|持续)?(下降|降低|提升|提高|增加|减少)`,
+    'g',
+  )
+  res = res.replace(denomRegex3, (_match, timePrefix, target, degree, direction) => {
+    const tp = timePrefix ? `${timePrefix}` : ''
+    const deg = degree ? `${degree}` : ''
+    return `${tp}${target}${deg}${direction}`
+  })
+
+  return res
+}
+
+/**
+ * Strip repetitive echoes and circular restatements (MrGeDiao/shuorenhua).
+ * e.g. "调整了重试策略。重试策略已经调整过了。" -> "调整了重试策略。"
+ */
+export function stripRepetitiveEchoes(text: string): string {
+  const actions = '调整|修改|优化|更新|重构|重写|检查|测试|梳理|重命名|修复|排查|改造|适配|升级|验证|上线|发布|清理|对齐|迁移|核对|替换'
+
+  // Pattern 1: Action了Target ... [Target]已经Action过(了) anywhere in paragraph
+  const actionTargetRegex = new RegExp(`(${actions})了([^，。！？\\n\\s]+?)(?=[，。！？\\n\\s]|$)`, 'g')
+  let res = text
+  let match: RegExpExecArray | null
+  while ((match = actionTargetRegex.exec(text)) !== null) {
+    const act = match[1]
+    const tgt = match[2].trim()
+    if (!tgt || tgt.length > 20) continue
+    const escapedTgt = tgt.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const duplicatePattern = new RegExp(
+      `[，。\\s]*(?:简而言之[，,]?\\s*)?${escapedTgt}(?:已经|已)?(?:${actions})(?:过|完毕|完成)(?:了)?[。，]?`,
+      'g',
+    )
+    res = res.replace(duplicatePattern, (m, offset) => {
+      // If at end of string or before punctuation, keep proper terminal
+      const after = res.slice(offset + m.length).trim()
+      return after.length > 0 ? '，' : '。'
+    })
+  }
+
+  // Pattern 2: Target已经Action过(了)。Action了Target。
+  const reverseEchoRegex = new RegExp(
+    `([^，。！？\\n]+?)(?:已经|已)(?:${actions})(?:过|完毕|完成)(?:了)?[。，\\s]+(${actions})了\\1[。，]?`,
+    'g',
+  )
+  res = res.replace(reverseEchoRegex, '$2了$1。')
+
+  // Clean multiple periods/punctuation caused by deletion without eating newlines
+  res = res.replace(/([。！？])[。！？\t ]+/g, '$1')
+  res = res.replace(/[，,][\s]*([。！？])/g, '$1')
+  res = res.replace(/([。！？])[，,]+/g, '$1')
+  res = res.replace(/，{2,}/g, '，')
+
+  // Restore trailing period if lost
+  if (/[。！？]$/.test(text.trim()) && !/[。！？]$/.test(res.trim())) {
+    res = `${res.trim()}。`
+  }
+
+  return res
+}

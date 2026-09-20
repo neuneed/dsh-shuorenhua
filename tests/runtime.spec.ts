@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { ShuorenhuaRuntime } from '../src/runtime.js'
+import { registerShuorenhuaTools, ShuorenhuaRuntime } from '../src/runtime.js'
 
 describe('ShuorenhuaRuntime', () => {
   it('calls humanize method over Typert service instance', async () => {
@@ -56,5 +56,28 @@ describe('ShuorenhuaRuntime', () => {
     const runtime = new ShuorenhuaRuntime(ctx)
     const res = await runtime.humanize('测试文本')
     expect(res.text).toBe('大白话')
+  })
+
+  it('registerShuorenhuaTools executes successfully via agent tool definition', async () => {
+    const ctx = new Context()
+    let registeredTool: any = null
+    ctx.provide('tools', {
+      register: (toolDef: any) => {
+        registeredTool = toolDef
+        return () => {}
+      },
+    } as any)
+
+    registerShuorenhuaTools(ctx)
+    expect(registeredTool).not.toBeNull()
+    expect(registeredTool.name).toBe('shuorenhua_simplify')
+
+    // Test tool execution on the user's sentence
+    const out = await registeredTool.execute({
+      text: '本次完成了对重试策略的调整。重试策略已经调整过了。重复请求从 24 次降到 7 次。',
+    })
+    expect(out.ok).toBe(true)
+    expect(out.simplified).toBe('本次调整了重试策略，重复请求从 24 次降到 7 次。')
+    expect(out.stats.savedPercentage).toBeGreaterThan(0)
   })
 })

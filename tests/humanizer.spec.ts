@@ -59,4 +59,23 @@ pnpm add @deepseek-ai/cordis
     expect(res.text).toContain('1. 安装依赖')
     expect(res.text).toContain('2. 配置入口')
   })
+
+  it('de-nominalizes bureaucratic phrasing and eliminates circular repetition (MrGeDiao)', () => {
+    const input = '本次完成了对重试策略的调整。重试策略已经调整过了。重复请求从 24 次降到 7 次。'
+    const res = humanize(input)
+
+    expect(res.text).toBe('本次调整了重试策略，重复请求从 24 次降到 7 次。')
+    expect(res.stats.savedPercentage).toBeGreaterThan(0)
+    expect(res.stats.humanizedLength).toBeLessThan(res.stats.originalLength)
+  })
+
+  it('strips meta-commentary wrappers while preserving facts', () => {
+    const input = '值得注意的是，本轮我们完成了对重试策略的调整，失败请求数从 24 次降到 7 次。简而言之，重试策略已经调整过了。'
+    const res = humanize(input)
+
+    expect(res.text).not.toContain('值得注意的是')
+    expect(res.text).not.toContain('简而言之')
+    expect(res.text).toContain('本轮调整了重试策略')
+    expect(res.text).toContain('失败请求数从 24 次降到 7 次')
+  })
 })

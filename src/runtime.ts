@@ -337,9 +337,9 @@ export function registerShuorenhuaWebServer(
 
 /**
  * Register DSH Agent tool for LLM self-simplification and user commands.
- * The tool runs the local rule engine, so it needs no LLM config.
+ * The tool uses LLM generation when available, with a fast offline rule engine fallback.
  */
-export function registerShuorenhuaTools(ctx: Context): () => void {
+export function registerShuorenhuaTools(ctx: Context, config: ShuorenhuaConfig = {}): () => void {
   const toolsService = ctx.get('tools')
   if (!toolsService || typeof toolsService.register !== 'function') {
     return () => {}
@@ -372,7 +372,42 @@ export function registerShuorenhuaTools(ctx: Context): () => void {
       title: '说人话润色',
     }),
     async execute(args: { text: string }) {
-      const result = humanize(args.text)
+      const rawText = args.text ?? ''
+
+      // 1. Try LLM generation if llm service is active
+      const llmService = ctx.get('llm')
+      if (llmService && typeof llmService.stream === 'function') {
+        try {
+          let assembled = ''
+          for await (const chunk of streamHumanize(ctx, rawText, config)) {
+            assembled += chunk
+          }
+          if (assembled.trim()) {
+            const originalLength = rawText.length
+            const humanizedLength = assembled.length
+            const savedPercentage = originalLength > 0
+              ? Math.max(0, Math.round(((originalLength - humanizedLength) / originalLength) * 100))
+              : 0
+            return {
+              ok: true,
+              simplified: assembled.trim(),
+              stats: {
+                originalLength,
+                humanizedLength,
+                savedPercentage,
+                removedOpeners: 0,
+                removedClosers: 0,
+                replacedBuzzwords: 0,
+              },
+            }
+          }
+        } catch {
+          // Gracefully fallback to rule engine
+        }
+      }
+
+      // 2. Offline / local rule engine fallback
+      const result = humanize(rawText)
       return {
         ok: true,
         simplified: result.text,

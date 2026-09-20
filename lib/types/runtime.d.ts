@@ -34,6 +34,6 @@ export declare class ShuorenhuaRuntime extends TypertRemoteService {
 export declare function registerShuorenhuaWebServer(ctx: Context, config?: ShuorenhuaConfig, cacheRef?: ShuorenhuaCacheHolder): () => void;
 /**
  * Register DSH Agent tool for LLM self-simplification and user commands.
- * The tool runs the local rule engine, so it needs no LLM config.
+ * The tool uses LLM generation when available, with a fast offline rule engine fallback.
  */
-export declare function registerShuorenhuaTools(ctx: Context): () => void;
+export declare function registerShuorenhuaTools(ctx: Context, config?: ShuorenhuaConfig): () => void;

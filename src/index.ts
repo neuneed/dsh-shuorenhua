@@ -100,7 +100,7 @@ export function apply(ctx: Context, config?: Config): void {
   if (resolved.enableTool !== false) {
     ctx.inject(['tools'], (toolCtx) => {
       toolCtx.effect(
-        () => registerShuorenhuaTools(toolCtx),
+        () => registerShuorenhuaTools(toolCtx, resolved),
         'dsh-shuorenhua: agent tools',
       )
     })

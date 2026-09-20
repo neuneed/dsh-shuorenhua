@@ -9,7 +9,10 @@ import {
   BUZZWORD_REPLACEMENTS,
   CLOSING_BOILERPLATES,
   FILLER_SENTENCES,
+  META_FILLERS,
   OPENING_GREETINGS,
+  applyDenominalization,
+  stripRepetitiveEchoes,
 } from './rules.js'
 
 /**
@@ -79,6 +82,22 @@ export function humanize(input: string, options: HumanizeOptions = {}): Humanize
       processed = processed.replaceAll(regex, '')
     }
   }
+
+  // 4.5 Strip meta-commentary and transition fillers (MrGeDiao/shuorenhua)
+  for (const regex of META_FILLERS) {
+    if (regex.test(processed)) {
+      processed = processed.replaceAll(regex, '')
+    }
+  }
+
+  // 4.6 Apply de-nominalization (e.g. 完成了对重试策略的调整 -> 调整了重试策略)
+  processed = applyDenominalization(processed)
+
+  // 4.7 Strip repetitive echoes and circular restatements (e.g. 重试策略已经调整过了)
+  processed = stripRepetitiveEchoes(processed)
+
+  // 4.8 Smooth commas between action and metric result
+  processed = processed.replace(/([。])\s*(重复请求|失败请求|请求数|耗时|延迟|错误率|吞吐量|QPS|中位数|失败数)/g, '，$2')
 
   // 5. Replace buzzwords
   for (const item of BUZZWORD_REPLACEMENTS) {

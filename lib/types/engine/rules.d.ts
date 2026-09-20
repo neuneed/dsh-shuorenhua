@@ -17,3 +17,14 @@ export declare const BUZZWORD_REPLACEMENTS: Array<{
 }>;
 /** Empty filler sentences inside text. */
 export declare const FILLER_SENTENCES: RegExp[];
+/** Meta-commentary and transition fillers to strip directly (MrGeDiao/shuorenhua). */
+export declare const META_FILLERS: RegExp[];
+/**
+ * De-nominalization rules: convert bureaucratic "完成了对X的调整" into natural "调整了X" (MrGeDiao/shuorenhua).
+ */
+export declare function applyDenominalization(text: string): string;
+/**
+ * Strip repetitive echoes and circular restatements (MrGeDiao/shuorenhua).
+ * e.g. "调整了重试策略。重试策略已经调整过了。" -> "调整了重试策略。"
+ */
+export declare function stripRepetitiveEchoes(text: string): string;
