@@ -94,7 +94,7 @@ DSH 的核心设计哲学之一是**双端同体（Host-Client Bifacial）**。�
 
 ---
 
-## 二、DSH 插件原理（重点）
+## 二、DSH 插件原理
 
 ### 2.1 DSH 的插件介绍
 
@@ -150,44 +150,162 @@ ctx.effect(() => {
 
 ---
 
-### 2.4 注册机制
+### 2.4 注册机制（深层剖析）
 
-在 DSH 开发中，服务依赖和注册分为三种截然不同的场景：
+在 DSH / Cordis 的架构哲学中，**“一切依赖显式声明，一切注册皆为可逆 Effect”**。
+很多初学者常困惑：为什么有的写在 `inject` 里，有的写在 `ctx.inject` 里，有的用 `ctx.get`，有的要 `ctx.effect`，到底什么时候用哪个？哪种才是最常用的？
 
-#### 1. 静态强依赖 (`export const inject = [...]`)
+下面从**依赖消费**、**能力提供**、**资产注册**三个维度系统拆解，并标注使用频次与官方依据。
+
+#### 维度一：服务依赖与消费的 3 种姿势（重点）
+
+| 模式 | 常用指数 | 适用场景 | 缺失时的行为 | 官方设计意图 |
+| :--- | :--- | :--- | :--- | :--- |
+| **① 静态强依赖 (`export const inject`)** | **⭐⭐⭐⭐⭐ (最常用·黄金标准)** | 插件核心功能依赖的基础服务（如 `llm`、`slots`、`locale`） | 插件保持 `PENDING`，`apply` 绝不执行 | **零竞态**：代码执行时 100% 保证服务存在，无需任何判空；依赖重载时自动级联重载 |
+| **② 动态条件注入 (`ctx.inject`)** | **⭐⭐⭐⭐ (环境适配首选)** | 跨运行模式的可选功能（如 `webServer` 只在 Web 下有，Headless 下没有） | 暂不执行回调，一旦服务就绪立即触发 | **多模自适应**：让同一个插件能无缝兼容 Web、CLI、Headless 多种 profile |
+| **③ 运行时只读安全探测 (`ctx.get`)** | **⭐⭐ (防御性辅助)** | 只读探测辅助配置或状态（如 `agentDefaultModel` 探测当前选中模型） | 返回 `undefined`，插件继续正常跑 | **安全防爆**：绕过 Cordis 的 Proxy 报错拦截，安全读取动态状态 |
+
+---
+
+##### 1. 【最常用 ⭐⭐⭐⭐⭐】静态强依赖声明 (`export const inject = [...]`)
+这是 DSH 插件开发中 **90% 场景下的首选**。
+- **代码范例**（本项目 `src/index.ts` / `src/client/index.tsx`）：
+  ```ts
+  export const name = 'dsh-shuorenhua'
+  // 静态强依赖：声明插件启动的必要条件
+  export const inject = ['llm']
+
+  export function apply(ctx: Context) {
+    // 此时 ctx.llm 100% 就绪且类型安全，无需任何判空！
+    console.log('LLM service ready:', ctx.llm)
+  }
+  ```
+- **工作机制（官方规范）**：
+  1. Cordis 在加载插件模块前，首先静态读取导出的 `inject` 数组；
+  2. 如果数组中有任何一个服务未就绪，Fiber 状态保持为 `PENDING`，`apply` 压根不会被调用；
+  3. **级联重载与依赖跟踪**：当运行时某个依赖服务被热更新或卸载时，Cordis 会自动将该消费插件注销（Dispose），直到新依赖提供后再自动重新激活（Re-apply）。彻底杜绝了悬空引用与内存泄漏。
+
+---
+
+##### 2. 【次常用 ⭐⭐⭐⭐】动态条件注入 (`ctx.inject([...], callback)`)
+用于**平台/环境解耦**。如果某个功能只有在特定环境（如 Web 模式）下才启用，绝不能放进静态 `inject`，必须使用动态条件注入。
+- **代码范例**（本项目 `src/index.ts`）：
+  ```ts
+  // WebServer 仅在 Web profile 下存在；在 Headless 命令行下不存在
+  ctx.inject(['webServer'], (webCtx) => {
+    webCtx.effect(() => {
+      // 仅在 webServer 激活后才挂载路由
+      return registerShuorenhuaWebServer(webCtx, resolved)
+    }, 'dsh-shuorenhua: webserver route')
+  })
+  ```
+- **工作机制**：
+  - 当目标服务激活时，回调函数被调用，传入具有该服务作用域的 `webCtx`；
+  - 如果应用在纯命令行模式（如 `pnpm dsh --profile headless`）运行，`webServer` 不存在，回调静默不执行，**但插件主体（如 Agent 工具）依然能正常工作**！
+  - **避坑红线**：千万不能把环境专有服务（如 `webServer`）写进静态 `export const inject`，否则会导致插件在命令行模式下永久处于 `PENDING` 假死状态！
+
+---
+
+##### 3. 【防御性常用 ⭐⭐】运行时安全探测 (`ctx.get('serviceName')`)
+用于**偶发性、只读性状态探测**。
+- **代码范例**（本项目 `src/runtime.ts`）：
+  ```ts
+  // 正确：使用 ctx.get 探测当前选中的默认模型服务
+  const defaultModelService = ctx.get('agentDefaultModel')
+  if (defaultModelService && typeof defaultModelService.currentSelection === 'function') {
+    const selection = defaultModelService.currentSelection()
+    // 探测到了用户在界面上选中的主模型...
+  }
+  ```
+- **深入底层：为什么不能直接写 `ctx.agentDefaultModel`？**
+  - Cordis 的上下文 `ctx` 底层是一个被深度 `Proxy` 拦截的对象；
+  - 如果一个插件**没有在 `inject` 里声明**该服务，直接通过属性点语法 `ctx.someService` 访问时，Proxy 的 `get` 陷阱（Trap）会主动抛出致命异常：
+    `Error: cannot get property "xxx" without inject`
+  - 这种设计的官方意图是：**强制杜绝隐式依赖**。要安全地进行可选探测，必须通过专门开放的 `ctx.get('xxx')` API，它在服务不存在时会安全返回 `undefined`，而绝不抛错。
+
+---
+
+#### 维度二：提供新服务的注册机制 (Service Provision)
+
+如果你的插件本身要向 DSH 全局上下文贡献一个**全新的服务能力**（如扩展文件提供方、会话存储提供方、或者像本项目一样提供 `shuorenhua` 服务）：
+
 ```ts
-export const name = 'dsh-shuorenhua'
-export const inject = ['llm'] // 没有 LLM，本插件毫无意义，必须等待它就绪
-```
-- **机制**：由 Cordis 在模块加载前分析。只有数组中所有服务都在上下文中挂载后，`apply` 才会触发。
+import { Service, type Context } from '@deepseek-ai/cordis'
 
-#### 2. 动态条件注入 (`ctx.inject([...], callback)`)
-```ts
-// 当 webServer 存在时才挂载 HTTP 路由（在 Headless 纯命令行模式下没有 webServer，会自动跳过）
-ctx.inject(['webServer'], (webCtx) => {
-  webCtx.effect(() => registerShuorenhuaWebServer(webCtx, config))
-})
-```
-- **机制**：当目标服务在运行时被激活时，回调函数才会执行，并且获得的 `webCtx` 作用域生命周期与该服务绑定。
+// 1. TypeScript 声明合并（编译期类型安全）
+declare module '@deepseek-ai/cordis' {
+  interface Context {
+    shuorenhua: ShuorenhuaService
+  }
+}
 
-#### 3. 运行时安全探测 (`ctx.get('serviceName')`)
-```ts
-// 为什么不能写: const model = ctx.agentDefaultModel?.currentSelection() ?
-// 答：因为 ctx 是一个被 Proxy 代理的对象，直接访问未在 inject 中声明的属性会直接抛出：
-// Error: cannot get property "agentDefaultModel" without inject
+// 2. 继承 Service（运行时服务注册）
+export class ShuorenhuaService extends Service {
+  constructor(ctx: Context) {
+    // 关键调用：super(ctx, '服务名称') 会自动将本实例挂载到 ctx.shuorenhua
+    super(ctx, 'shuorenhua')
+  }
 
-// 正确姿势：使用 ctx.get 安全探测
-const defaultModelService = ctx.get('agentDefaultModel')
-if (defaultModelService && typeof defaultModelService.currentSelection === 'function') {
-  const selection = defaultModelService.currentSelection()
-  // ...
+  // 暴露公共能力方法
+  simplify(text: string): string {
+    return text.trim()
+  }
+}
+
+// 3. 在插件入口中挂载
+export function apply(ctx: Context) {
+  ctx.plugin(ShuorenhuaService) // 挂载为子插件
 }
 ```
+- **机制**：`super(ctx, 'key')` 内部会自动向 Cordis 注册此服务。当该插件卸载时，服务会自动从全局上下文中拔除，依赖该服务的下游插件随之被自动注销。
 
-**三者边界总结**：
-- **静态 `inject`**：插件赖以生存的核心硬依赖（少而精）；
-- **动态 `ctx.inject`**：平台相关的可选功能模块（如 WebServer、Tools）；
-- **安全 `ctx.get`**：只读查询性质、随时可能存在或不存在的辅助状态。
+---
+
+#### 维度三：具体能力与资产的注册范式 (Asset Registration)
+
+在拿到具体服务后，向服务注册工具、路由、插槽或事件，必须严格遵守 **“注册是可逆 Effect（Disposer 模式）”**。
+
+| 资产类别 | 注册方法 | 对应服务 | 是否自动返回 Disposer | 代码范例 |
+| :--- | :--- | :--- | :--- | :--- |
+| **大模型工具** | `ctx.tools.register(...)` | `ctx.tools` | 是 | `tools.register(defineTool({ name, execute }))` |
+| **HTTP 路由** | `ctx.webServer.register(...)` | `ctx.webServer` | 是 | `webServer.register({ path, handler })` |
+| **前端插槽** | `ctx.slots.inject(...)` + `register` | `ctx.slots` | 是 | `slots.inject(name, () => slots.register(...))` |
+| **国际化词典** | `ctx.locale.define(...)` | `ctx.locale` | 是 | `locale.define('zh', dictionary)` |
+| **事件监听** | `ctx.on(event, listener)` | `ctx.events` | 是 | `ctx.on('tools/result', callback)` |
+| **洋葱圈中间件** | `ctx.waterfall(event, listener)` | `ctx.events` | 是 | `ctx.waterfall('llm/stream', (opts, next) => next())` |
+
+##### 核心铁律：所有不可自动回收的注册必须包裹在 `ctx.effect` 中
+DSH 架构规则明确规定：*“Registrations are effects: every contribution goes through ctx.effect() / ctx.on(); a registry's register() returns the disposer.”*
+- 如果你调用的 API 返回了 `disposer`（如路由注册、定时器、事件监听器），务必在 `ctx.effect` 的清理回调中调用它：
+  ```ts
+  ctx.effect(() => {
+    const unregister = webServer.register({ path: '/shuorenhua/stream', handler })
+    return () => {
+      // 插件被卸载或 HMR 重载时，Cordis 逆序执行此 Disposer
+      unregister()
+    }
+  }, 'shuorenhua: webserver route')
+  ```
+
+---
+
+#### 💡 注册决策树速查
+
+当你写代码需要用到某个 DSH 能力或注册资产时，按以下决策树秒选：
+
+```
+需要使用某个服务能力？
+  ├─ 核心功能强依赖，缺了插件就不能跑？
+  │    └──> 【首选 ⭐⭐⭐⭐⭐】写入 `export const inject = ['xxx']`
+  ├─ 仅在特定环境（如 Web）下才启用的附加功能？
+  │    └──> 【次选 ⭐⭐⭐⭐】使用 `ctx.inject(['xxx'], (ctx) => { ... })`
+  └─ 只是临时只读探测一个辅助状态，不存在也不影响主流程？
+       └──> 【探测 ⭐⭐】使用 `ctx.get('xxx')`
+
+向系统注册资产（路由 / 工具 / 监听器 / 计时器）？
+  └─ 必须包裹在 `ctx.effect(() => { ... return () => dispose() })` 中，
+     确保热重载与卸载时 100% 自动清理无残留！
+```
 
 ---
 
