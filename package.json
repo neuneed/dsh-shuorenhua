@@ -36,9 +36,32 @@
     "cordis.patch.yml",
     "dsh.plugin.json",
     "README.md",
+    "docs",
     "LICENSE"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/neuneed/dsh-shuorenhua.git"
+  },
+  "homepage": "https://github.com/neuneed/dsh-shuorenhua#readme",
+  "bugs": {
+    "url": "https://github.com/neuneed/dsh-shuorenhua/issues"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "deepseek-harness-plugin",
+    "dsh",
+    "dsh-plugin",
+    "cordis",
+    "cordis-plugin",
+    "deepseek",
+    "humanizer",
+    "shuorenhua",
+    "ai-writing",
+    "text-simplification"
+  ],
   "scripts": {
+    "prepare": "pnpm run build",
     "build": "node build.mjs && tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.tests.json --noEmit",
     "test": "vitest run",
@@ -105,17 +128,5 @@
     "typescript": "^5.7.0",
     "typescript-eslint": "^8.35.0",
     "vitest": "^3.2.0"
-  },
-  "keywords": [
-    "dsh-plugin",
-    "deepseek-harness",
-    "shuorenhua",
-    "humanizer",
-    "ai-writing",
-    "text-simplification"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/neuneed/dsh-shuorenhua.git"
   }
 }
