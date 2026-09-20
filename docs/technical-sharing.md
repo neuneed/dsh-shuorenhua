@@ -169,17 +169,28 @@ ctx.effect(() => {
 
 ##### 1. 【最常用 ⭐⭐⭐⭐⭐】静态强依赖声明 (`export const inject = [...]`)
 这是 DSH 插件开发中 **90% 场景下的首选**。
-- **代码范例**（本项目 `src/index.ts` / `src/client/index.tsx`）：
-  ```ts
-  export const name = 'dsh-shuorenhua'
-  // 静态强依赖：声明插件启动的必要条件
-  export const inject = ['llm']
+- **代码范例**：
+  - **Host 宿主端入口**（[`src/index.ts`](../src/index.ts)）：
+    ```ts
+    export const name = 'dsh-shuorenhua'
+    // 宿主强依赖：必须等待大语言模型服务就绪
+    export const inject = ['llm']
 
-  export function apply(ctx: Context) {
-    // 此时 ctx.llm 100% 就绪且类型安全，无需任何判空！
-    console.log('LLM service ready:', ctx.llm)
-  }
-  ```
+    export function apply(ctx: Context) {
+      // 此时 ctx.llm 100% 就绪且类型安全，无需任何判空！
+      console.log('LLM service ready:', ctx.llm)
+    }
+    ```
+  - **Client 浏览器端入口**（[`src/client/index.tsx`](../src/client/index.tsx)）：
+    ```ts
+    export const name = 'dsh-shuorenhua'
+    // 前端强依赖：必须等待 UI 插槽与国际化服务就绪
+    export const inject = ['slots', 'locale']
+
+    export function apply(ctx: ClientContext) {
+      // 此时 ctx.slots 和 ctx.locale 均已就绪
+    }
+    ```
 - **工作机制（官方规范）**：
   1. Cordis 在加载插件模块前，首先静态读取导出的 `inject` 数组；
   2. 如果数组中有任何一个服务未就绪，Fiber 状态保持为 `PENDING`，`apply` 压根不会被调用；
@@ -270,7 +281,7 @@ export function apply(ctx: Context) {
 | **大模型工具** | `ctx.tools.register(...)` | `ctx.tools` | 是 | `tools.register(defineTool({ name, execute }))` |
 | **HTTP 路由** | `ctx.webServer.register(...)` | `ctx.webServer` | 是 | `webServer.register({ path, handler })` |
 | **前端插槽** | `ctx.slots.inject(...)` + `register` | `ctx.slots` | 是 | `slots.inject(name, () => slots.register(...))` |
-| **国际化词典** | `ctx.locale.define(...)` | `ctx.locale` | 是 | `locale.define('zh', dictionary)` |
+| **国际化词典** | `ctx.locale.register(...)` | `ctx.locale` | 是 | `locale.register(NS, { zh, en })` |
 | **事件监听** | `ctx.on(event, listener)` | `ctx.events` | 是 | `ctx.on('tools/result', callback)` |
 | **洋葱圈中间件** | `ctx.waterfall(event, listener)` | `ctx.events` | 是 | `ctx.waterfall('llm/stream', (opts, next) => next())` |
 
@@ -352,20 +363,25 @@ export function registerShuorenhuaWebServer(ctx: Context, config: ShuorenhuaConf
     kind: 'exact',
     path: '/shuorenhua/stream',
     handler: async (req, res) => {
-      // 1. 建立 SSE 标准响应头
+      // 1. 读取请求体并解析待润色文本
+      let bodyText = ''
+      for await (const chunk of req) bodyText += chunk
+      const { text = '' } = JSON.parse(bodyText)
+
+      // 2. 建立 SSE 标准响应头
       res.setHeader('Content-Type', 'text/event-stream; charset=utf-8')
       res.setHeader('Cache-Control', 'no-cache, no-transform')
       res.setHeader('Connection', 'keep-alive')
       res.flushHeaders?.()
 
-      // 2. 核心精髓：监听客户端连接断开，联动中止底层大模型
+      // 3. 核心精髓：监听客户端连接断开，联动中止底层大模型
       const controller = new AbortController()
       req.on('close', () => {
         // 用户关闭弹窗、按 ESC 或切换页面时，立即中止宿主 LLM 生成，节省 Token！
         controller.abort()
       })
 
-      // 3. 消费 Host 端 ctx.llm 流并实时向浏览器推帧
+      // 4. 消费 Host 端 ctx.llm 流并实时向浏览器推帧
       try {
         for await (const chunk of streamHumanize(ctx, text, config, controller.signal)) {
           res.write(`data: ${JSON.stringify({ delta: chunk })}\n\n`)
@@ -506,8 +522,9 @@ export function apply(ctx: ClientContext): void {
     ctx.slots.register(
       {
         name: 'conversation.chat.assistant-actions',
-        id: 'dsh-shuorenhua-action',
+        id: 'shuorenhua',
         order: 12, // DSH 默认复制按钮为 10，分支按钮为 20。设为 12 精准排在二者之间！
+        locale: NS,
       },
       ShuorenhuaButton,
     ),
@@ -630,6 +647,10 @@ dsh-shuorenhua/
    - 优先调用现代浏览器标准的 `navigator.clipboard.writeText(text)`；
    - 在非 HTTPS 或限制性环境下自动降级为 `document.execCommand('copy')`；
    - 复制成功后呈现 2 秒动画反馈（「✓ 已复制」）。
+5. **纯享 / 对比分栏双重视图 (Pure vs Diff)**：
+   - 支持在单栏「纯享大白话」与双栏「字数精简对比（原内容 vs 润色后）」之间自由切换，满足用户对修改细节的核对需求。
+6. **一键重新润色 (Regenerate)**：
+   - 用户点击「🔄 重新润色」时，先调用 `abortControllerRef.current.abort()` 中止旧连接，随后重新向宿主拉取最新流式结果，支持随时打断与重发。
 
 ---
 
@@ -712,12 +733,14 @@ dsh-shuorenhua/
 
 ## 七、参考资料
 
-- **DSH 官方子系统文档**：
-  - WebServer 服务规范：`docs/subsystems/web-server.md`
-  - API Gateway 与 RPC：`docs/api-gateway.md`
-  - Typert 远程类型系统：`docs/subsystems/typert.md`
-- **DSH 模型提供方开发**：
-  - LLM Provider 接入指南：`docs/user/develop/practice/llm-adapter.md`
+- **DSH 官方架构与子系统文档**：
+  - [WebServer 服务规范 (docs/subsystems/web-server.zh.md)](https://github.com/deepseek-ai/deepseek-harness/blob/main/docs/subsystems/web-server.zh.md)
+  - [API Gateway 与 RPC (docs/api-gateway.zh.md)](https://github.com/deepseek-ai/deepseek-harness/blob/main/docs/api-gateway.zh.md)
+  - [Typert 远程类型系统 (docs/subsystems/typert.zh.md)](https://github.com/deepseek-ai/deepseek-harness/blob/main/docs/subsystems/typert.zh.md)
+  - [Cordis 入门指南 (docs/cordis-primer.zh.md)](https://github.com/deepseek-ai/deepseek-harness/blob/main/docs/cordis-primer.zh.md)
+  - [LLM Provider 接入指南 (docs/user/develop/practice/llm-adapter.zh.md)](https://github.com/deepseek-ai/deepseek-harness/blob/main/docs/user/develop/practice/llm-adapter.zh.md)
 - **本项目完整源码**：
-  - 宿主与算法逻辑：`src/index.ts`、`src/runtime.ts`、`src/engine/`
-  - 前端组件与样式：`src/client/`
+  - 宿主入口：[`src/index.ts`](../src/index.ts)
+  - 宿主核心服务与 SSE 路由：[`src/runtime.ts`](../src/runtime.ts)
+  - 去八股清洗引擎：[`src/engine/`](../src/engine/)
+  - 浏览器端入口与组件：[`src/client/`](../src/client/)
