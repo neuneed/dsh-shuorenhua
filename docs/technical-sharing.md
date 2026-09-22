@@ -575,14 +575,18 @@ export function ShuorenhuaButton({ messageId }: { messageId?: string }) {
 dsh-shuorenhua/
 ├── package.json             # 插件清单，声明 dsh.bundle 与 dsh.client
 ├── cordis.patch.yml         # 注入到 DSH 运行时的编排补丁
-├── dsh.plugin.json          # 插件对外贡献的 Tool/Skill 清单声明
 ├── build.mjs                # 双端打包管线 (Host ESM + Browser CJS)
 ├── tsconfig.json            # 源码 TypeScript 配置
 ├── tsconfig.build.json      # 类型声明分发配置
 ├── vitest.config.ts         # 单元测试配置
+├── skills/                  # 【打包技能】随插件分发的 SKILL.md 目录
+│   └── shuorenhua/          #   说人话审稿技能（手动审稿 / 只标问题 / 文风改写）
+│       ├── SKILL.md         #   技能正文与 frontmatter（name/description/whenToUse）
+│       └── references/      #   按需加载的编辑边界与改写对照参考
 ├── src/
 │   ├── types.ts             # 核心类型契约定义
 │   ├── typert.ts            # Typert RPC 契约清单
+│   ├── skills.ts            # 【技能注册】扫描打包 skills/ 目录，注册 ctx.skills provider
 │   ├── index.ts             # 【Host 入口】生命周期控制与服务条件挂载
 │   ├── runtime.ts           # 【Host 核心】调 ctx.llm、注册 SSE 路由、注册 Agent 工具
 │   ├── engine/              # 【核心规则库】双端通用去八股算法与 System Prompt
@@ -601,7 +605,8 @@ dsh-shuorenhua/
     ├── placeholders.spec.ts # 占位符保真测试
     ├── rules.spec.ts        # 正则过滤规则测试
     ├── humanizer.spec.ts    # 多模式文本润色测试
-    └── runtime.spec.ts      # Host 端 RPC 服务与 LLM 流式测试
+    ├── runtime.spec.ts      # Host 端 RPC 服务与 LLM 流式测试
+    └── skills.spec.ts       # 打包技能 provider 扫描与加载测试
 ```
 
 **每个目录/文件的职责一句话说明：**
@@ -610,15 +615,16 @@ dsh-shuorenhua/
 |---|---|
 | `package.json` | 声明 `dsh.bundle` 和 `dsh.client`，告诉 DSH 怎么加载这个插件 |
 | `cordis.patch.yml` | 把插件注入 DSH 运行时的编排补丁，启动时通过 `--patch` 挂载 |
-| `dsh.plugin.json` | 对外声明本插件贡献了哪些 Tool 和 Skill |
 | `build.mjs` | 双端构建脚本，Host 出 ESM，Client 出 CJS + ModuleLoader 包裹 |
+| `skills/` | 随插件打包的 SKILL.md 目录，由 `src/skills.ts` 扫描注册到 `ctx.skills` |
 | `src/index.ts` | Host 入口，`apply` 函数里做生命周期控制和条件挂载 |
 | `src/runtime.ts` | Host 核心逻辑：调 LLM 流式生成、注册 SSE 路由、注册 Agent 工具 |
+| `src/skills.ts` | 打包技能 provider：扫描 `skills/` 目录，以 rank 400 / source `bundled` 注册到 `ctx.skills` |
 | `src/engine/` | 双端共用的去八股算法库，不依赖任何 DSH 服务，可独立测试 |
 | `src/client/index.tsx` | Client 入口，往 `assistant-actions` 插槽注入按钮 |
 | `src/client/components/` | 按钮组件和弹窗组件，纯 React 实现 |
 | `src/client/locales.ts` | 中英文案字典，注册到 `ctx.locale` |
-| `tests/` | Vitest 单元测试，覆盖占位符、规则、清洗引擎、Host 运行时 |
+| `tests/` | Vitest 单元测试，覆盖占位符、规则、清洗引擎、Host 运行时、技能 provider |
 
 ---
 

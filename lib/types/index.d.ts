@@ -4,7 +4,7 @@
  * Provides Host-side Typert RPC remote service, streaming WebServer route, and Agent tool.
  */
 import type { Context } from '@deepseek-ai/cordis';
-import z from '@deepseek-ai/schemastery';
+import type Schema from '@deepseek-ai/schemastery';
 export declare const name = "dsh-shuorenhua";
 export interface Config {
     provider?: string;
@@ -14,20 +14,10 @@ export interface Config {
     enableCache?: boolean;
     /** Soft LRU cap on cached rewrites. Default: 100. */
     cacheMaxEntries?: number;
+    /** Register the packaged shuorenhua skill provider on ctx.skills. Default: true. */
+    enableSkill?: boolean;
 }
-export declare const Config: z<Schemastery.ObjectS<{
-    provider: z<string, string>;
-    model: z<string, string>;
-    enableTool: z<boolean, boolean>;
-    enableCache: z<boolean, boolean>;
-    cacheMaxEntries: z<number, number>;
-}>, Schemastery.ObjectT<{
-    provider: z<string, string>;
-    model: z<string, string>;
-    enableTool: z<boolean, boolean>;
-    enableCache: z<boolean, boolean>;
-    cacheMaxEntries: z<number, number>;
-}>>;
+export declare const Config: Schema<Config>;
 /**
  * Apply the Host-side Shuorenhua plugin to the Cordis Context.
  * @param ctx - Cordis Context.

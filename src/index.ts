@@ -5,8 +5,10 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
+import type Schema from '@deepseek-ai/schemastery'
 import type {} from '@deepseek-ai/dsh-typert-registry'
 import { registerShuorenhuaTools, registerShuorenhuaWebServer, ShuorenhuaRuntime } from './runtime.js'
+import { registerShuorenhuaSkills } from './skills.js'
 import { TYPERT_MANIFEST } from './typert.js'
 import type { ShuorenhuaConfig } from './types.js'
 import { openShuorenhuaCache, type ShuorenhuaCacheHolder } from './cache.js'
@@ -23,14 +25,17 @@ export interface Config {
   enableCache?: boolean
   /** Soft LRU cap on cached rewrites. Default: 100. */
   cacheMaxEntries?: number
+  /** Register the packaged shuorenhua skill provider on ctx.skills. Default: true. */
+  enableSkill?: boolean
 }
 
-export const Config = z.object({
+export const Config: Schema<Config> = z.object({
   provider: z.string(),
   model: z.string(),
   enableTool: z.boolean().default(true),
   enableCache: z.boolean().default(true),
   cacheMaxEntries: z.number().default(100),
+  enableSkill: z.boolean().default(true),
 })
 
 /**
@@ -102,6 +107,16 @@ export function apply(ctx: Context, config?: Config): void {
       toolCtx.effect(
         () => registerShuorenhuaTools(toolCtx, resolved),
         'dsh-shuorenhua: agent tools',
+      )
+    })
+  }
+
+  // 5. Register packaged shuorenhua skill provider when skills service is available
+  if (resolved.enableSkill !== false) {
+    ctx.inject(['skills'], (skillCtx) => {
+      skillCtx.effect(
+        () => registerShuorenhuaSkills(skillCtx),
+        'dsh-shuorenhua: skill provider',
       )
     })
   }

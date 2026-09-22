@@ -55,4 +55,6 @@ export interface ShuorenhuaConfig {
   enableCache?: boolean
   /** Soft LRU cap on cached rewrites. Default: 100. */
   cacheMaxEntries?: number
+  /** Whether to register the packaged shuorenhua skill provider on ctx.skills. Default: true. */
+  enableSkill?: boolean
 }

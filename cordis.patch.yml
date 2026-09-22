@@ -1,6 +1,11 @@
-# dsh-shuorenhua bundle: mounts the Shuorenhua plugin into DSH
+# dsh-shuorenhua bundle: mounts the Shuorenhua plugin into DSH.
+# enableTool registers shuorenhua_simplify; enableSkill registers the packaged
+# shuorenhua skill provider. Both default to true via the plugin schema; stated
+# here for discoverability. Omitted keys (provider/model/enableCache/...) fall
+# back to schema defaults.
 - insert:
     - id: dsh-shuorenhua
       name: dsh-shuorenhua
       config:
         enableTool: true
+        enableSkill: true
