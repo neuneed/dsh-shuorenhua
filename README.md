@@ -5,7 +5,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![DeepSeek Harness](https://img.shields.io/badge/DSH-Plugin-success.svg)](https://github.com/deepseek-ai/deepseek-harness)
-
+[![Listed on dsh-plugin.org](https://dsh-plugin.org/badges/listed.svg)](https://dsh-plugin.org/plugins/neuneed/dsh-shuorenhua)
 ---
 
 ## 📖 简介
