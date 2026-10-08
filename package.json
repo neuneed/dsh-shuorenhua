@@ -61,7 +61,6 @@
     "text-simplification"
   ],
   "scripts": {
-    "prepare": "pnpm run build",
     "build": "node build.mjs && tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.tests.json --noEmit",
     "test": "vitest run",
